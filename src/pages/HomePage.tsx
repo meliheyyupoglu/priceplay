@@ -90,10 +90,10 @@ export function HomePage() {
       setLoading(true)
       setErr(null)
       try {
-        const [pRaw, dRaw, fpRaw, hoRaw] = await Promise.all([
+        // F2P tohum + Metacritic enrich çok uzun sürer; ilk boyayı bloklamasın (Vercel/Render’da “takılı” hissi).
+        const [pRaw, dRaw, hoRaw] = await Promise.all([
           fetchPopularGames(FETCH_PAGES),
           fetchDiscountedGames(FETCH_PAGES),
-          fetchCuratedFreeToPlayByMetacritic(48).catch(() => [] as Game[]),
           fetchHundredPercentFreeDeals(24, 12).catch(() => [] as Game[]),
         ])
         if (cancelled) return
@@ -102,13 +102,23 @@ export function HomePage() {
         const hoUnique = uniqueByGameKey(hoRaw).slice(0, HOME_100_CAROUSEL)
         const hoKeys = new Set(hoUnique.map((g) => g.gameId || g.title))
         const dWithoutDeals = dUnique.filter((g) => !hoKeys.has(g.gameId || g.title))
-        const fpFiltered = fpRaw.filter((g) => !hoKeys.has(g.gameId || g.title)).slice(0, HOME_FREE_GRID)
         setThumbPool(pUnique)
         setPopular(popularPreviewByMetacritic(pUnique, HOME_PREVIEW))
         setDiscounted(dWithoutDeals.slice(0, HOME_PREVIEW))
-        setFreePopular(fpFiltered)
         setHundredOff(hoUnique)
+        setFreePopular([])
         if (!cancelled) setLoading(false)
+
+        void (async () => {
+          try {
+            const fpRaw = await fetchCuratedFreeToPlayByMetacritic(48).catch(() => [] as Game[])
+            if (cancelled) return
+            const fpFiltered = fpRaw.filter((g) => !hoKeys.has(g.gameId || g.title)).slice(0, HOME_FREE_GRID)
+            if (!cancelled) setFreePopular(fpFiltered)
+          } catch {
+            if (!cancelled) setFreePopular([])
+          }
+        })()
 
         try {
           await new Promise((r) => setTimeout(r, 200))
