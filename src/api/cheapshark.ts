@@ -328,7 +328,21 @@ export async function searchGames(title: string, limit = 20): Promise<Game[]> {
 export async function fetchGameJson(gameId: string): Promise<Record<string, unknown>> {
   const url = `${CHEAPSHARK_BASE}/games?id=${encodeURIComponent(gameId)}`
   const r = await fetch(url, { headers })
-  if (!r.ok) throw new Error(`Oyun detayı: ${r.status}`)
+  if (!r.ok) {
+    if (r.status === 429) {
+      throw new Error(
+        'CheapShark şu an çok meşgul (429). 30–60 saniye sonra sayfayı yenile veya biraz bekleyip tekrar dene.',
+      )
+    }
+    let detail = ''
+    try {
+      const j = (await r.json()) as { detail?: string; error?: string }
+      detail = j.detail || j.error || ''
+    } catch {
+      /* gövde JSON değil */
+    }
+    throw new Error(detail ? `Oyun detayı (${r.status}): ${detail}` : `Oyun detayı: ${r.status}`)
+  }
   return (await r.json()) as Record<string, unknown>
 }
 

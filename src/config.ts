@@ -16,10 +16,17 @@ export function apiBaseAbsolute(): string {
 
 export const CHEAPSHARK_BASE = `${API_BASE}/cheapshark`
 
-/** Geliştirmede Vite proxy (`/steam-store`); prod için `VITE_STEAM_API_BASE` veya doğrudan Steam (CORS riski) */
+/**
+ * Steam Store API tabanı.
+ * - Dev: Vite `/steam-store` proxy (CORS yok).
+ * - Prod: `VITE_API_BASE_URL` varsa Steam çağrıları Render’daki `/api/steam/...` üzerinden (ortak havuz + CORS).
+ * - İsteğe bağlı: `VITE_STEAM_API_BASE` ile başka bir taban.
+ */
 export function steamApiBase(): string {
   if (import.meta.env.DEV) return '/steam-store/api'
   const fromEnv = import.meta.env.VITE_STEAM_API_BASE as string | undefined
   if (fromEnv?.trim()) return fromEnv.replace(/\/$/, '')
+  const api = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '')
+  if (api?.trim()) return `${api}/steam`
   return 'https://store.steampowered.com/api'
 }

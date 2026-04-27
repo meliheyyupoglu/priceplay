@@ -64,6 +64,11 @@ let pushEnabled = false;
 const backgroundRefreshAt = new Map();
 const UPSTREAM_BACKGROUND_REFRESH_MS = 90_000;
 
+/** Steam `appdetails` — tüm istemciler Render üzerinden; TTL ile ortak havuz. */
+const steamAppDetailsCache = new Map();
+const STEAM_APPDETAILS_TTL_MS = 15 * 60 * 1000;
+const STEAM_APPDETAILS_MAX_KEYS = 500;
+
 /** Sunucu yeniden baslayinca 429 oncesi son CheapShark yanitlari */
 const CHEAPSHARK_STALE_DISK = path.join(dataDir, "cheapshark_upstream_stale.json");
 let persistStaleTimer = null;
@@ -338,15 +343,19 @@ function snapshotFallbackForRoute(routePath, qNorm) {
 
 async function fetchUpstreamCheapshark(routePath, qNorm, cacheKey) {
   const url = `${CHEAPSHARK_BASE_URL}${routePath}`;
-  let delayMs = 500;
+  /** Tek oyun sayfası sık 429; önbellekte olmayan `id=` için biraz daha sabırlı dene */
+  const isGameDetail =
+    routePath === "/games" && String(qNorm.id ?? "").trim() !== "" && String(qNorm.title ?? "").trim() === "";
+  const maxAttempts = isGameDetail ? 7 : 4;
+  let delayMs = isGameDetail ? 900 : 500;
   let lastError = null;
 
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       await waitForUpstreamSlot();
       const response = await axios.get(url, {
         params: Object.keys(qNorm).length ? qNorm : undefined,
-        timeout: 15000,
+        timeout: 18000,
         headers: {
           "User-Agent": "GamePriceProxy/1.0",
           Accept: "application/json",
@@ -359,7 +368,7 @@ async function fetchUpstreamCheapshark(routePath, qNorm, cacheKey) {
       const status = error.response?.status;
       const retryAfterSec = Number(error.response?.headers?.["retry-after"]);
       const canRetry = status === 429 || (status >= 500 && status <= 599);
-      if (canRetry && attempt < 4) {
+      if (canRetry && attempt < maxAttempts) {
         const fromHeader =
           Number.isFinite(retryAfterSec) && retryAfterSec > 0
             ? Math.min(retryAfterSec * 1000, MAX_RETRY_AFTER_MS)
@@ -546,6 +555,7 @@ app.get("/", (_req, res) => {
     message: "CheapShark proxy server is running",
     health: "/health",
     apiBase: "/api/cheapshark",
+    steamAppDetails: "/api/steam/appdetails (Store proxy + önbellek)",
     browseCategories: "/api/browse/categories",
     warmup: WARMUP_SECRET ? "POST /api/admin/warmup-cheapshark (X-Warmup-Secret)" : null,
     cheapsharkUpstreamEnabled: CHEAPSHARK_UPSTREAM_ENABLED,
@@ -557,12 +567,47 @@ app.get("/api/browse/categories", (_req, res) => {
   res.json(browseCategoriesList);
 });
 
+/** Tarayıcı CORS yüzünden Steam’e gidemez; prod’da Vite bu uç üzerinden çağırır. */
+app.get("/api/steam/appdetails", async (req, res) => {
+  const qNorm = normalizeQueryForCache(req.query);
+  const cacheKey = buildCacheKey("__steamAppDetails", qNorm);
+  const now = Date.now();
+  const hit = steamAppDetailsCache.get(cacheKey);
+  if (hit && hit.expiresAt > now) {
+    return res.json(hit.value);
+  }
+  try {
+    const r = await axios.get("https://store.steampowered.com/api/appdetails", {
+      params: Object.keys(qNorm).length ? qNorm : undefined,
+      timeout: 22000,
+      headers: {
+        Accept: "application/json",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 PricePlay/1.0",
+      },
+      validateStatus: () => true,
+    });
+    const data = r.data;
+    if (typeof data === "object" && data !== null) {
+      steamAppDetailsCache.set(cacheKey, { value: data, expiresAt: now + STEAM_APPDETAILS_TTL_MS });
+      while (steamAppDetailsCache.size > STEAM_APPDETAILS_MAX_KEYS) {
+        const first = steamAppDetailsCache.keys().next().value;
+        steamAppDetailsCache.delete(first);
+      }
+    }
+    return res.status(r.status >= 400 ? r.status : 200).json(data);
+  } catch (e) {
+    return res.status(502).json({ error: "Steam appdetails proxy failed", detail: e.message || String(e) });
+  }
+});
+
 function cheapsharkRouteErrorStatus(err) {
   if (err.code === "CHEAPSHARK_CACHE_MISS") return 503;
   const s = err.response?.status;
-  if (s === 429) return 502;
+  // Upstream 429: 502 yerine gerçek kod (istemci “çok istek” diye anlasın; CDN 502 sanmasın)
+  if (s === 429) return 429;
   if (typeof s === "number" && s >= 400 && s < 600) return s;
-  return 502;
+  return 503;
 }
 
 app.get("/api/cheapshark/deals", async (req, res) => {
