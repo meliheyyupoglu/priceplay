@@ -22,6 +22,8 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = String(process.env.HOST || "0.0.0.0");
 const CHEAPSHARK_BASE_URL =
   process.env.CHEAPSHARK_BASE_URL || "https://www.cheapshark.com/api/1.0";
+const CHEAPSHARK_PROXY_BASE_URL =
+  process.env.CHEAPSHARK_PROXY_BASE_URL || "https://api.allorigins.win/raw?url=";
 /** CheapShark yanitlari — varsayilan 24 saat (429 riskini azaltir). .env: CACHE_TTL_SECONDS */
 const CACHE_TTL_SECONDS = Number(process.env.CACHE_TTL_SECONDS || 86400);
 /** Upstream istekleri arasinda minimum bekleme (ms). */
@@ -544,10 +546,18 @@ function snapshotFallbackForRoute(routePath, qNorm) {
   return null;
 }
 
+function buildCheapsharkProxiedUrl(routePath, qNorm) {
+  const originalUrl = new URL(`${CHEAPSHARK_BASE_URL}${routePath}`);
+  for (const [key, value] of Object.entries(qNorm || {})) {
+    originalUrl.searchParams.append(key, String(value));
+  }
+  return `${CHEAPSHARK_PROXY_BASE_URL}${encodeURIComponent(originalUrl.toString())}`;
+}
+
 async function fetchUpstreamCheapshark(routePath, qNorm, cacheKey, options = {}) {
   const caller = String(options.caller || "unknown_caller");
   const triggerRoute = String(options.triggerRoute || "unknown_route");
-  const url = `${CHEAPSHARK_BASE_URL}${routePath}`;
+  const proxiedUrl = buildCheapsharkProxiedUrl(routePath, qNorm);
   const isGameDetail = routePath === "/games" && String(qNorm.id || "").trim() !== "";
   const maxAttempts =
     1 + UPSTREAM_MAX_RETRIES + (isGameDetail ? UPSTREAM_GAME_DETAIL_EXTRA_RETRIES : 0);
@@ -568,8 +578,7 @@ async function fetchUpstreamCheapshark(routePath, qNorm, cacheKey, options = {})
         maxAttempts,
         queryParams: qNorm,
       });
-      const response = await axios.get(url, {
-        params: Object.keys(qNorm).length ? qNorm : undefined,
+      const response = await axios.get(proxiedUrl, {
         timeout: UPSTREAM_TIMEOUT_MS,
         headers: {
           "User-Agent": "GamePriceProxy/1.0",
