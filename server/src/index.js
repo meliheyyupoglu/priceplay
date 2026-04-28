@@ -194,6 +194,23 @@ function buildCacheKey(routePath, query) {
   return `${routePath}:${JSON.stringify(sortedEntries)}`;
 }
 
+function parseCacheKey(cacheKey) {
+  const idx = cacheKey.indexOf(":");
+  if (idx < 0) return null;
+  const routePath = cacheKey.slice(0, idx);
+  try {
+    const pairs = JSON.parse(cacheKey.slice(idx + 1));
+    if (!Array.isArray(pairs)) return null;
+    const q = {};
+    for (const pair of pairs) {
+      if (Array.isArray(pair) && pair.length >= 2) q[String(pair[0])] = String(pair[1]);
+    }
+    return { routePath, qNorm: normalizeQueryForCache(q) };
+  } catch {
+    return null;
+  }
+}
+
 function migrateLegacyCacheKey(legacyKey) {
   const idx = legacyKey.indexOf(":");
   if (idx < 0) return legacyKey;
@@ -256,12 +273,129 @@ function recordSnapshotForPersist(cacheKey, value) {
 }
 
 function setCached(key, value) {
+  const parsed = parseCacheKey(key);
+  const routePath = parsed?.routePath || "";
+  const qNorm = parsed?.qNorm || {};
   cache.set(key, {
     value,
     expiresAt: Date.now() + CACHE_TTL_SECONDS * 1000,
   });
   recordSnapshotForPersist(key, value);
   schedulePersistStaleToDisk();
+  if (USE_POSTGRES && pgPool && routePath) {
+    void upsertCheapsharkSnapshot(key, routePath, qNorm, value);
+  }
+}
+
+async function upsertCheapsharkSnapshot(cacheKey, routePath, qNorm, payload) {
+  if (!USE_POSTGRES || !pgPool) return;
+  try {
+    await pgPool.query(
+      `INSERT INTO cheapshark_snapshots (cache_key, route_path, query_json, payload_json, updated_at)
+       VALUES ($1, $2, $3::jsonb, $4::jsonb, NOW())
+       ON CONFLICT (cache_key)
+       DO UPDATE SET route_path = EXCLUDED.route_path,
+                     query_json = EXCLUDED.query_json,
+                     payload_json = EXCLUDED.payload_json,
+                     updated_at = NOW()`,
+      [cacheKey, routePath, JSON.stringify(qNorm || {}), JSON.stringify(payload)]
+    );
+  } catch (e) {
+    console.warn("CheapShark snapshot DB upsert hatasi:", e.message || e);
+  }
+}
+
+function hydrateCacheFromSnapshot(cacheKey, payload) {
+  if (cache.has(cacheKey)) return false;
+  cache.set(cacheKey, { value: payload, expiresAt: 0 });
+  recordSnapshotForPersist(cacheKey, payload);
+  return true;
+}
+
+async function loadCheapsharkFromDb() {
+  if (!USE_POSTGRES || !pgPool) return;
+  try {
+    const { rows } = await pgPool.query(
+      `SELECT cache_key, payload_json
+       FROM cheapshark_snapshots
+       ORDER BY updated_at DESC
+       LIMIT 2000`
+    );
+    let loaded = 0;
+    for (const row of rows) {
+      if (hydrateCacheFromSnapshot(String(row.cache_key), row.payload_json)) loaded += 1;
+    }
+    if (loaded > 0) {
+      console.log(`CheapShark: Postgres snapshot'tan ${loaded} anahtar yuklendi.`);
+    }
+  } catch (e) {
+    console.warn("CheapShark Postgres snapshot okunamadi:", e.message || e);
+  }
+}
+
+async function getSnapshotByCacheKeyFromDb(cacheKey) {
+  if (!USE_POSTGRES || !pgPool) return null;
+  try {
+    const { rows } = await pgPool.query(
+      `SELECT payload_json FROM cheapshark_snapshots WHERE cache_key = $1 LIMIT 1`,
+      [cacheKey]
+    );
+    return rows[0]?.payload_json ?? null;
+  } catch (e) {
+    console.warn("CheapShark snapshot DB read hatasi:", e.message || e);
+    return null;
+  }
+}
+
+async function getSnapshotFallbackFromDb(routePath, qNorm) {
+  if (!USE_POSTGRES || !pgPool) return null;
+  try {
+    if (routePath === "/stores") {
+      const storesKey = buildCacheKey("/stores", {});
+      const payload = await getSnapshotByCacheKeyFromDb(storesKey);
+      if (payload != null) return payload;
+    }
+    if (routePath !== "/deals") return null;
+    const onSale = String(qNorm.onSale || "") === "1" ? "1" : "";
+    const { rows } = await pgPool.query(
+      `SELECT cache_key, payload_json
+       FROM cheapshark_snapshots
+       WHERE route_path = '/deals'
+         AND COALESCE(query_json->>'onSale', '') = $1
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [onSale]
+    );
+    const row = rows[0];
+    if (!row) return null;
+    hydrateCacheFromSnapshot(String(row.cache_key), row.payload_json);
+    return row.payload_json;
+  } catch (e) {
+    console.warn("CheapShark snapshot DB fallback read hatasi:", e.message || e);
+    return null;
+  }
+}
+
+async function backfillCheapsharkDbFromMemory() {
+  if (!USE_POSTGRES || !pgPool) return;
+  try {
+    const { rows } = await pgPool.query("SELECT COUNT(*)::int AS n FROM cheapshark_snapshots");
+    const count = Number(rows[0]?.n) || 0;
+    if (count > 0) return;
+    const tasks = [];
+    for (const [cacheKey, entry] of cache.entries()) {
+      const parsed = parseCacheKey(cacheKey);
+      if (!parsed) continue;
+      tasks.push(upsertCheapsharkSnapshot(cacheKey, parsed.routePath, parsed.qNorm, entry.value));
+      if (tasks.length >= 2000) break;
+    }
+    if (tasks.length > 0) {
+      await Promise.all(tasks);
+      console.log(`CheapShark: disk/bellekten Postgres snapshot backfill (${tasks.length} anahtar).`);
+    }
+  } catch (e) {
+    console.warn("CheapShark Postgres backfill hatasi:", e.message || e);
+  }
 }
 
 async function loadStaleFromDisk() {
@@ -568,6 +702,26 @@ async function cheapSharkGet(routePath, query, options = {}) {
       }
     }
     return soft;
+  }
+
+  const dbExact = await getSnapshotByCacheKeyFromDb(cacheKey);
+  if (isUsableCheapsharkSoft(routePath, dbExact)) {
+    cache.set(cacheKey, {
+      value: dbExact,
+      expiresAt: Date.now() + CACHE_TTL_SECONDS * 1000,
+    });
+    recordSnapshotForPersist(cacheKey, dbExact);
+    return dbExact;
+  }
+
+  const dbFallback = await getSnapshotFallbackFromDb(routePath, qNorm);
+  if (isUsableCheapsharkSoft(routePath, dbFallback)) {
+    cache.set(cacheKey, {
+      value: dbFallback,
+      expiresAt: Date.now() + CACHE_TTL_SECONDS * 1000,
+    });
+    recordSnapshotForPersist(cacheKey, dbFallback);
+    return dbFallback;
   }
 
   if (!shouldAllowLiveFetchOnMiss(routePath, qNorm, forceUpstream)) {
@@ -964,6 +1118,17 @@ async function initUsersDbIfNeeded() {
     created_at TEXT NOT NULL,
     updated_at TEXT
   )`);
+  await pgPool.query(`CREATE TABLE IF NOT EXISTS cheapshark_snapshots (
+    cache_key TEXT PRIMARY KEY,
+    route_path TEXT NOT NULL,
+    query_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    payload_json JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+  await pgPool.query(
+    `CREATE INDEX IF NOT EXISTS idx_cheapshark_snapshots_route_updated
+     ON cheapshark_snapshots (route_path, updated_at DESC)`
+  );
 }
 
 function mapPgUserToApiUser(row) {
@@ -1571,7 +1736,9 @@ async function startServer() {
   await fs.mkdir(dataDir, { recursive: true });
   await initUsersDbIfNeeded();
   await migrateUsersFileToDbIfNeeded();
+  await loadCheapsharkFromDb();
   await loadStaleFromDisk();
+  await backfillCheapsharkDbFromMemory();
   initFirebaseAdmin();
   cron.schedule(PRICE_CHECK_CRON, async () => {
     try {
