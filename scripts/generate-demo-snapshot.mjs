@@ -8,6 +8,8 @@ const PAGE_SIZE = Number(process.env.DEMO_PAGE_SIZE || 60)
 const PAGES_PER_RUN = Number(process.env.DEMO_PAGES_PER_RUN || 3)
 const DETAILS_PER_RUN = Number(process.env.DEMO_DETAILS_PER_RUN || 60)
 const STEAM_DETAILS_PER_RUN = Number(process.env.DEMO_STEAM_DETAILS_PER_RUN || 80)
+const SKIP_SEARCH = String(process.env.DEMO_SKIP_SEARCH || '0').trim() === '1'
+const ONLY_BACKFILL_EXISTING = String(process.env.DEMO_ONLY_BACKFILL_EXISTING || '0').trim() === '1'
 
 const SEARCH_TERMS = String(
   process.env.DEMO_SEARCH_TERMS || 'elden,portal,gta,witcher,cyberpunk,fifa,forza,minecraft,hades,resident evil',
@@ -136,48 +138,52 @@ async function main() {
     if (!Array.isArray(db.stores) || db.stores.length === 0) {
       db.stores = await getJson(`${CHEAPSHARK_BASE}/stores`, { allow429: true })
     }
-    await runStage(async () =>
-      harvestDeals(db, 'popular', (page) => ({
-        sortBy: 'Deal Rating',
-        pageSize: String(PAGE_SIZE),
-        pageNumber: String(page),
-      })),
-    )
-    await runStage(async () =>
-      harvestDeals(db, 'discounted', (page) => ({
-        onSale: '1',
-        sortBy: 'Savings',
-        pageSize: String(PAGE_SIZE),
-        pageNumber: String(page),
-      })),
-    )
-    await runStage(async () =>
-      harvestDeals(db, 'newReleases', (page) => ({
-        sortBy: 'Release',
-        pageSize: String(PAGE_SIZE),
-        pageNumber: String(page),
-      })),
-    )
-    await runStage(async () =>
-      harvestDeals(db, 'free100', (page) => ({
-        onSale: '1',
-        sortBy: 'Savings',
-        pageSize: String(PAGE_SIZE),
-        pageNumber: String(page),
-      })),
-    )
+    if (!ONLY_BACKFILL_EXISTING) {
+      await runStage(async () =>
+        harvestDeals(db, 'popular', (page) => ({
+          sortBy: 'Deal Rating',
+          pageSize: String(PAGE_SIZE),
+          pageNumber: String(page),
+        })),
+      )
+      await runStage(async () =>
+        harvestDeals(db, 'discounted', (page) => ({
+          onSale: '1',
+          sortBy: 'Savings',
+          pageSize: String(PAGE_SIZE),
+          pageNumber: String(page),
+        })),
+      )
+      await runStage(async () =>
+        harvestDeals(db, 'newReleases', (page) => ({
+          sortBy: 'Release',
+          pageSize: String(PAGE_SIZE),
+          pageNumber: String(page),
+        })),
+      )
+      await runStage(async () =>
+        harvestDeals(db, 'free100', (page) => ({
+          onSale: '1',
+          sortBy: 'Savings',
+          pageSize: String(PAGE_SIZE),
+          pageNumber: String(page),
+        })),
+      )
+    }
 
-    await runStage(async () => {
-      for (const term of SEARCH_TERMS) {
-        const q = term.toLowerCase()
-        if (Array.isArray(db.searches[q]) && db.searches[q].length > 0) continue
-        const list = await getJson(`${CHEAPSHARK_BASE}/games?title=${encodeURIComponent(term)}&limit=40`, {
-          allow429: true,
-        })
-        db.searches[q] = Array.isArray(list) ? list : []
-        await new Promise((r) => setTimeout(r, 90))
-      }
-    })
+    if (!SKIP_SEARCH && !ONLY_BACKFILL_EXISTING) {
+      await runStage(async () => {
+        for (const term of SEARCH_TERMS) {
+          const q = term.toLowerCase()
+          if (Array.isArray(db.searches[q]) && db.searches[q].length > 0) continue
+          const list = await getJson(`${CHEAPSHARK_BASE}/games?title=${encodeURIComponent(term)}&limit=40`, {
+            allow429: true,
+          })
+          db.searches[q] = Array.isArray(list) ? list : []
+          await new Promise((r) => setTimeout(r, 90))
+        }
+      })
+    }
 
     await runStage(async () => {
       const allGameIds = uniqueGameIdsFromDeals(

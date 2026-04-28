@@ -55,6 +55,49 @@ function parseGamesFromUnknownArray(list: unknown[] | undefined): Game[] {
   return out
 }
 
+function buildFallbackGamePayloadFromSnapshot(
+  gameId: string,
+  snap: DemoSnapshot,
+): Record<string, unknown> | null {
+  const pools = [snap.popular ?? [], snap.discounted ?? [], snap.newReleases ?? [], snap.free100 ?? []]
+  const matchedDeals: Record<string, unknown>[] = []
+  let title = gameId
+  let thumb: string | null = null
+  let steamAppID: string | null = null
+
+  for (const pool of pools) {
+    for (const raw of pool) {
+      if (!raw || typeof raw !== 'object') continue
+      const o = raw as Record<string, unknown>
+      const id = String(o.gameID ?? o.gameId ?? '').trim()
+      if (id !== gameId) continue
+      title = String(o.title ?? o.external ?? title).trim() || title
+      if (!thumb && o.thumb != null) thumb = String(o.thumb)
+      const sid = o.steamAppID != null ? String(o.steamAppID).trim() : ''
+      if (!steamAppID && sid && sid !== '0') steamAppID = sid
+      matchedDeals.push({
+        storeID: String(o.storeID ?? ''),
+        salePrice: String(o.salePrice ?? o.price ?? '0'),
+        retailPrice: String(o.normalPrice ?? o.retailPrice ?? '0'),
+        savings: String(o.savings ?? '0'),
+        dealRating: String(o.dealRating ?? '0'),
+        dealID: String(o.dealID ?? ''),
+        releaseDate: String(o.releaseDate ?? ''),
+      })
+    }
+  }
+
+  if (matchedDeals.length === 0) return null
+  return {
+    info: {
+      title,
+      thumb,
+      steamAppID: steamAppID ?? null,
+    },
+    deals: matchedDeals,
+  } as Record<string, unknown>
+}
+
 async function fetchJsonOrFallback<T>(url: string, fallback: T): Promise<T> {
   try {
     const r = await fetch(url, { headers })
@@ -413,6 +456,8 @@ export async function fetchGameJson(gameId: string): Promise<Record<string, unkn
     const snap = await getDemoSnapshot()
     const hit = snap.gameDetails?.[String(gameId)]
     if (hit && typeof hit === 'object') return hit
+    const fallbackFromDeals = buildFallbackGamePayloadFromSnapshot(String(gameId), snap)
+    if (fallbackFromDeals) return fallbackFromDeals
     const fallbackTitle = String(gameId || 'Unknown Game').trim() || 'Unknown Game'
     return {
       info: { title: fallbackTitle, steamAppID: null, thumb: null },
