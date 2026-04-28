@@ -420,6 +420,40 @@ export async function fetchHundredPercentFreeDeals(maxGames = 20, maxPages = 10)
   return out
 }
 
+export async function fetchAllKnownGames(maxGames = 2000): Promise<Game[]> {
+  if (DEMO_SNAPSHOT_MODE) {
+    const snap = await getDemoSnapshot()
+    const merged = [
+      ...parseGamesFromUnknownArray(snap.curatedPopular),
+      ...parseGamesFromUnknownArray(snap.popular),
+      ...parseGamesFromUnknownArray(snap.discounted),
+      ...parseGamesFromUnknownArray(snap.newReleases),
+      ...parseGamesFromUnknownArray(snap.free100),
+    ]
+    const uniq = new Map<string, Game>()
+    for (const g of merged) {
+      const k = g.gameId || g.title
+      if (!k || uniq.has(k)) continue
+      uniq.set(k, g)
+    }
+    return [...uniq.values()].slice(0, maxGames)
+  }
+
+  const [a, b, c] = await Promise.all([
+    fetchPopularGames(10),
+    fetchDiscountedGames(10),
+    fetchNewReleaseDeals(400, 12),
+  ])
+  const merged = [...a, ...b, ...c]
+  const uniq = new Map<string, Game>()
+  for (const g of merged) {
+    const k = g.gameId || g.title
+    if (!k || uniq.has(k)) continue
+    uniq.set(k, g)
+  }
+  return [...uniq.values()].slice(0, maxGames)
+}
+
 export async function searchGames(title: string, limit = 20): Promise<Game[]> {
   if (DEMO_SNAPSHOT_MODE) {
     const snap = await getDemoSnapshot()

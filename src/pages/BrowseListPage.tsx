@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { PageBack } from '../components/PageBack'
 import { FavoritesLoginHint } from '../components/FavoritesLoginHint'
 import {
+  fetchAllKnownGames,
   fetchCuratedFreeToPlayByMetacritic,
   fetchDiscountedGames,
   fetchHundredPercentFreeDeals,
@@ -40,13 +41,13 @@ export function BrowseListPage() {
           ? 'Popüler ücretsiz oyunlar'
           : k === 'new-releases'
             ? 'Yeni çıkan oyunlar'
-            : 'Oyun fırsatları (%100’e yakın)'
+            : 'Keşfet'
 
   const subtitle =
     k === 'free-popular'
       ? 'Sürekli ücretsiz (F2P) bilinen başlıklar; Metacritic’e göre yüksekten düşüğe. Geçici %100 indirimli ücretsiz teklifler bu listede yok.'
       : k === 'free-100'
-        ? 'Listede fiyatı olan ve şu an ücretsiz veya fiyatı sıfıra yakın indirimli teklifler.'
+        ? 'Veri setindeki 0$ oyunlar.'
         : k === 'new-releases'
           ? 'Çıkış tarihi bilinen oyunlar arasından en yeni tarihe göre sıralanır.'
           : null
@@ -62,7 +63,7 @@ export function BrowseListPage() {
         else if (k === 'discounted') raw = await fetchDiscountedGames(20)
         else if (k === 'free-popular') raw = await fetchCuratedFreeToPlayByMetacritic(80)
         else if (k === 'new-releases') raw = await fetchNewReleaseDeals(200, 18)
-        else raw = await fetchHundredPercentFreeDeals(200, 18)
+        else raw = await fetchHundredPercentFreeDeals(400, 24).catch(() => fetchAllKnownGames(4000))
 
         const unique = uniqueByGameKey(raw)
         const list =

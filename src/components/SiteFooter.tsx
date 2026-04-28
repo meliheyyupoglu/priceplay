@@ -11,7 +11,6 @@ export function SiteFooter() {
           <Link to="/">Ana sayfa</Link>
           <Link to="/browse/popular">Popüler</Link>
           <Link to="/browse/discounted">İndirim</Link>
-          <Link to="/browse/new-releases">Yeni çıkanlar</Link>
           <Link to="/auth">Hesap</Link>
         </div>
         <div className="site-footer-meta">

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
+  fetchAllKnownGames,
   fetchDiscountedGames,
   fetchHundredPercentFreeDeals,
-  fetchNewReleaseDeals,
   fetchPopularGames,
   searchGames,
 } from '../api/cheapshark'
@@ -18,13 +18,21 @@ import { genreLabelFor } from '../lib/genreTags'
 import { IconSearch } from '../components/NavIcons'
 import { HomePopularFreeGrid } from '../components/HomePopularFreeGrid'
 import { HomeGameDealsCarousel } from '../components/HomeGameDealsCarousel'
-import { HomeNewReleasesCarousel } from '../components/HomeNewReleasesCarousel'
 
 const HOME_PREVIEW = 10
 const FETCH_PAGES = 4
 const HOME_FREE_GRID = 10
 const HOME_100_CAROUSEL = 25
-const HOME_NEW_RELEASES = 20
+
+function pickRandomGames(games: Game[], count: number): Game[] {
+  if (games.length <= count) return games
+  const arr = [...games]
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+  return arr.slice(0, count)
+}
 
 function buildThumbsByCategory(categories: BrowseCategory[], games: Game[]): Record<string, string[]> {
   const out: Record<string, string[]> = {}
@@ -43,6 +51,11 @@ function isNearFree(game: Game): boolean {
   return Number.isFinite(p) && p >= 0 && p <= 0.05
 }
 
+function isZeroDollar(game: Game): boolean {
+  const p = Number.parseFloat(String(game.cheapest ?? '').replace(',', '.'))
+  return Number.isFinite(p) && p <= 0.01
+}
+
 export function HomePage() {
   const nav = useNavigate()
   const location = useLocation()
@@ -52,7 +65,6 @@ export function HomePage() {
   const [discounted, setDiscounted] = useState<Game[]>([])
   const [freePopular, setFreePopular] = useState<Game[]>([])
   const [hundredOff, setHundredOff] = useState<Game[]>([])
-  const [newReleases, setNewReleases] = useState<Game[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [suggest, setSuggest] = useState<Game[]>([])
@@ -95,10 +107,11 @@ export function HomePage() {
       setErr(null)
       try {
         // F2P tohum + Metacritic enrich çok uzun sürer; ilk boyayı bloklamasın (Vercel/Render’da “takılı” hissi).
-        const [pRaw, dRaw, hoRaw] = await Promise.all([
+        const [pRaw, dRaw, hoRaw, allRaw] = await Promise.all([
           fetchPopularGames(FETCH_PAGES),
           fetchDiscountedGames(FETCH_PAGES),
           fetchHundredPercentFreeDeals(24, 12).catch(() => [] as Game[]),
+          fetchAllKnownGames(2500).catch(() => [] as Game[]),
         ])
         if (cancelled) return
         const pUnique = uniqueByGameKey(pRaw)
@@ -109,20 +122,18 @@ export function HomePage() {
         setThumbPool(pUnique)
         setPopular(popularPreviewByMetacritic(pUnique, HOME_PREVIEW))
         setDiscounted(dWithoutDeals.slice(0, HOME_PREVIEW))
-        setHundredOff(hoUnique)
+        const discoverPool = uniqueByGameKey(allRaw)
+        const zeroDollarPool = discoverPool.filter(isZeroDollar)
+        const fallbackPool = hoUnique.filter(isZeroDollar)
+        setHundredOff(
+          pickRandomGames(
+            zeroDollarPool.length > 0 ? zeroDollarPool : fallbackPool,
+            HOME_100_CAROUSEL,
+          ),
+        )
         const freeFromPopular = pUnique.filter((g) => isNearFree(g) && !hoKeys.has(g.gameId || g.title))
         setFreePopular(freeFromPopular.slice(0, HOME_FREE_GRID))
         if (!cancelled) setLoading(false)
-
-        try {
-          await new Promise((r) => setTimeout(r, 200))
-          if (cancelled) return
-          const nrRaw = await fetchNewReleaseDeals(HOME_NEW_RELEASES, 16)
-          if (cancelled) return
-          setNewReleases(uniqueByGameKey(nrRaw).slice(0, HOME_NEW_RELEASES))
-        } catch {
-          if (!cancelled) setNewReleases([])
-        }
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Yükleme hatası')
       } finally {
@@ -237,8 +248,6 @@ export function HomePage() {
           <HomePopularFreeGrid games={freePopular} />
 
           <HomeGameDealsCarousel games={hundredOff} />
-
-          <HomeNewReleasesCarousel games={newReleases} />
         </>
       )}
     </>
