@@ -461,6 +461,7 @@ export async function searchGames(title: string, limit = 20): Promise<Game[]> {
     const exact = parseGamesFromUnknownArray(snap.searches?.[q])
     if (exact.length > 0) return exact.slice(0, limit)
     const pool = [
+      ...parseGamesFromUnknownArray(snap.curatedPopular),
       ...parseGamesFromUnknownArray(snap.popular),
       ...parseGamesFromUnknownArray(snap.discounted),
       ...parseGamesFromUnknownArray(snap.newReleases),
@@ -471,6 +472,23 @@ export async function searchGames(title: string, limit = 20): Promise<Game[]> {
       const k = g.gameId || g.title
       if (!k || uniq.has(k)) continue
       uniq.set(k, g)
+    }
+    // Curated/gameDetails içindeki ama listelerde görünmeyen başlıkları da aramaya ekle.
+    for (const [gameId, payload] of Object.entries(snap.gameDetails ?? {})) {
+      const info = payload?.info as Record<string, unknown> | undefined
+      const t = String(info?.title ?? '').trim()
+      if (!t) continue
+      const k = String(gameId || t).trim()
+      if (!k || uniq.has(k)) continue
+      uniq.set(k, {
+        gameId: String(gameId),
+        title: t,
+        steamAppId:
+          info?.steamAppID != null && String(info.steamAppID).trim() !== '0'
+            ? String(info.steamAppID).trim()
+            : null,
+        thumb: info?.thumb != null ? String(info.thumb) : null,
+      })
     }
     return [...uniq.values()]
       .filter((g) => g.title.toLowerCase().includes(q))

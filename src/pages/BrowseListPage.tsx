@@ -14,13 +14,14 @@ import type { Game } from '../types'
 import { GameCard } from '../components/GameCard'
 import { rotateByDailyOffset, sortGamesByMetacriticDesc, uniqueByGameKey } from '../lib/highlightUtils'
 
-type Kind = 'popular' | 'discounted' | 'free-popular' | 'free-100' | 'new-releases'
+type Kind = 'popular' | 'discounted' | 'free-popular' | 'free-100' | 'new-releases' | 'discover-all'
 
 function normalizeKind(raw: string | undefined): Kind {
   if (raw === 'discounted') return 'discounted'
   if (raw === 'free-popular') return 'free-popular'
   if (raw === 'free-100') return 'free-100'
   if (raw === 'new-releases') return 'new-releases'
+  if (raw === 'discover-all') return 'discover-all'
   return 'popular'
 }
 
@@ -41,7 +42,9 @@ export function BrowseListPage() {
           ? 'Popüler ücretsiz oyunlar'
           : k === 'new-releases'
             ? 'Yeni çıkan oyunlar'
-            : 'Keşfet'
+            : k === 'discover-all'
+              ? 'Keşfet - Tüm Oyunlar'
+              : 'Keşfet'
 
   const subtitle =
     k === 'free-popular'
@@ -50,6 +53,8 @@ export function BrowseListPage() {
         ? 'Veri setindeki 0$ oyunlar.'
         : k === 'new-releases'
           ? 'Çıkış tarihi bilinen oyunlar arasından en yeni tarihe göre sıralanır.'
+          : k === 'discover-all'
+            ? 'Veri setindeki tum oyunlar.'
           : null
 
   useEffect(() => {
@@ -63,13 +68,14 @@ export function BrowseListPage() {
         else if (k === 'discounted') raw = await fetchDiscountedGames(20)
         else if (k === 'free-popular') raw = await fetchCuratedFreeToPlayByMetacritic(80)
         else if (k === 'new-releases') raw = await fetchNewReleaseDeals(200, 18)
+        else if (k === 'discover-all') raw = await fetchAllKnownGames(4000)
         else raw = await fetchHundredPercentFreeDeals(400, 24).catch(() => fetchAllKnownGames(4000))
 
         const unique = uniqueByGameKey(raw)
         const list =
           k === 'popular'
             ? sortGamesByMetacriticDesc(unique)
-            : k === 'free-popular' || k === 'new-releases'
+            : k === 'free-popular' || k === 'new-releases' || k === 'discover-all'
               ? unique
               : rotateByDailyOffset(unique)
         if (!cancelled) setGames(list)

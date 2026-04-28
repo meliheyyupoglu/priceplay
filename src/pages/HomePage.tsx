@@ -18,6 +18,7 @@ import { genreLabelFor } from '../lib/genreTags'
 import { IconSearch } from '../components/NavIcons'
 import { HomePopularFreeGrid } from '../components/HomePopularFreeGrid'
 import { HomeGameDealsCarousel } from '../components/HomeGameDealsCarousel'
+import { HomeDiscoverGrid } from '../components/HomeDiscoverGrid'
 
 const HOME_PREVIEW = 10
 const FETCH_PAGES = 4
@@ -64,6 +65,7 @@ export function HomePage() {
   const [popular, setPopular] = useState<Game[]>([])
   const [discounted, setDiscounted] = useState<Game[]>([])
   const [freePopular, setFreePopular] = useState<Game[]>([])
+  const [discoverGames, setDiscoverGames] = useState<Game[]>([])
   const [hundredOff, setHundredOff] = useState<Game[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -123,6 +125,7 @@ export function HomePage() {
         setPopular(popularPreviewByMetacritic(pUnique, HOME_PREVIEW))
         setDiscounted(dWithoutDeals.slice(0, HOME_PREVIEW))
         const discoverPool = uniqueByGameKey(allRaw)
+        setDiscoverGames(pickRandomGames(discoverPool, HOME_100_CAROUSEL))
         const zeroDollarPool = discoverPool.filter(isZeroDollar)
         const fallbackPool = hoUnique.filter(isZeroDollar)
         setHundredOff(
@@ -246,6 +249,8 @@ export function HomePage() {
           <SteamHeroCarousel key={favTick} games={discounted} onFavoriteChange={() => setFavTick((x) => x + 1)} />
 
           <HomePopularFreeGrid games={freePopular} />
+
+          <HomeDiscoverGrid games={discoverGames} />
 
           <HomeGameDealsCarousel games={hundredOff} />
         </>
