@@ -21,6 +21,7 @@ type DemoSnapshot = {
   searches?: Record<string, unknown[]>
   gameDetails?: Record<string, Record<string, unknown>>
   steamAppDetails?: Record<string, Record<string, unknown>>
+  curatedPopular?: unknown[]
 }
 
 const DEMO_SNAPSHOT_MODE = String(import.meta.env.VITE_DEMO_SNAPSHOT_MODE ?? '1').trim() === '1'
@@ -307,6 +308,8 @@ function uniqueDealsToGames(data: unknown[], seen: Set<string>, out: Game[]) {
 export async function fetchPopularGames(pageCount = 4): Promise<Game[]> {
   if (DEMO_SNAPSHOT_MODE) {
     const snap = await getDemoSnapshot()
+    const curated = parseGamesFromUnknownArray(snap.curatedPopular)
+    if (curated.length > 0) return curated
     const list = parseGamesFromUnknownArray(snap.popular)
     return list.slice(0, Math.max(1, pageCount) * 60)
   }
@@ -499,20 +502,25 @@ export async function buildPriceRows(
   if (!deals?.length) return []
 
   const rows: PriceRow[] = []
+  const seenDealRows = new Set<string>()
   for (const raw of deals) {
     if (!raw || typeof raw !== 'object') continue
     const d = raw as Record<string, unknown>
     const sid = String(d.storeID ?? '')
+    const dealId = String(d.dealID ?? '')
+    const salePrice = String(d.salePrice ?? d.price ?? '0')
+    const dedupeKey = `${sid}|${dealId}|${salePrice}`
+    if (seenDealRows.has(dedupeKey)) continue
+    seenDealRows.add(dedupeKey)
     const name = storeNames[sid] ?? `Mağaza ${sid}`
-    const saleRaw = d.salePrice ?? d.price
     rows.push({
       storeId: sid,
       storeName: name,
-      salePrice: String(saleRaw ?? '0'),
+      salePrice,
       retailPrice: String(d.retailPrice ?? '0'),
       savings: String(d.savings ?? '0'),
       dealRating: String(d.dealRating ?? '0'),
-      dealId: String(d.dealID ?? ''),
+      dealId,
       releaseDate: String(d.releaseDate ?? ''),
       isSteamDirect: false,
     })
