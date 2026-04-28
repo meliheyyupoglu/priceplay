@@ -4,10 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "start": "npm --prefix server start",
+    "start:server": "npm --prefix server start",
+    "dev:server": "npm --prefix server run dev",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
+  },
+  "engines": {
+    "node": "20.x"
   },
   "dependencies": {
     "react": "^19.2.5",

@@ -19,6 +19,7 @@ dotenv.config();
 const app = express();
 
 const PORT = Number(process.env.PORT || 3000);
+const HOST = String(process.env.HOST || "0.0.0.0");
 const CHEAPSHARK_BASE_URL =
   process.env.CHEAPSHARK_BASE_URL || "https://www.cheapshark.com/api/1.0";
 /** CheapShark yanitlari — varsayilan 24 saat (429 riskini azaltir). .env: CACHE_TTL_SECONDS */
@@ -1759,8 +1760,8 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, () => {
-    console.log(`Proxy server is running on http://localhost:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`Proxy server is running on http://${HOST}:${PORT}`);
     console.log(`CheapShark cache TTL: ${CACHE_TTL_SECONDS}s (${Math.round(CACHE_TTL_SECONDS / 3600)}h)`);
     console.log(`CheapShark stale disk: ${CHEAPSHARK_STALE_DISK}`);
     console.log(
