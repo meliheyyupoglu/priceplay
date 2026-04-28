@@ -1,4 +1,5 @@
 import { CHEAPSHARK_BASE } from '../config'
+import { genreLabelFor } from '../lib/genreTags'
 import { releaseYearFromGame } from '../lib/gameRelease'
 import { F2P_POPULAR_SEEDS } from '../lib/freeToPlaySeeds'
 import type { Game, PriceRow } from '../types'
@@ -54,6 +55,62 @@ function parseGamesFromUnknownArray(list: unknown[] | undefined): Game[] {
     out.push(g)
   }
   return out
+}
+
+function normalizeToken(value: string): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+const CATEGORY_BY_GENRE_TOKEN: Array<{ key: string; tokens: string[] }> = [
+  { key: 'Shooter', tokens: ['shooter', 'fps', 'third person shooter'] },
+  { key: 'RPG', tokens: ['rpg', 'role playing', 'jrpg', 'action rpg'] },
+  { key: 'Strategy', tokens: ['strategy', 'turn based strategy', 'real time strategy', '4x'] },
+  { key: 'Simulation', tokens: ['simulation', 'building', 'management'] },
+  { key: 'Sports', tokens: ['sports'] },
+  { key: 'Racing', tokens: ['racing', 'driving'] },
+  { key: 'Adventure', tokens: ['adventure', 'story rich', 'open world'] },
+  { key: 'Action', tokens: ['action', 'hack and slash', 'combat'] },
+  { key: 'Indie', tokens: ['indie', 'roguelike', 'roguelite'] },
+]
+
+const CATEGORY_BY_TITLE_HINT: Array<{ key: string; tokens: string[] }> = [
+  { key: 'Shooter', tokens: ['counter strike', 'valorant', 'warzone', 'battlefield', 'rainbow six', 'destiny'] },
+  { key: 'RPG', tokens: ['witcher', 'elden ring', 'baldur', 'persona', 'skyrim', 'fallout'] },
+  { key: 'Strategy', tokens: ['civilization', 'europa universalis', 'hearts of iron', 'crusader kings', 'total war'] },
+  { key: 'Simulation', tokens: ['simulator', 'manager', 'truck', 'cities skylines'] },
+  { key: 'Sports', tokens: ['fifa', 'fc 24', 'football'] },
+  { key: 'Racing', tokens: ['forza', 'assetto corsa', 'racing'] },
+  { key: 'Indie', tokens: ['hades', 'hollow knight', 'stardew', 'balatro', 'vampire survivors'] },
+]
+
+function inferCategoryKeyFromSnapshotGame(game: Game, snap: DemoSnapshot): string {
+  const gameId = String(game.gameId || '').trim()
+  const info = gameId ? ((snap.gameDetails?.[gameId]?.info as Record<string, unknown> | undefined) ?? undefined) : undefined
+  const fromInfoSteam = info?.steamAppID != null ? String(info.steamAppID).trim() : ''
+  const steamAppId = game.steamAppId?.trim() || (fromInfoSteam && fromInfoSteam !== '0' ? fromInfoSteam : '')
+
+  if (steamAppId) {
+    const steamData = snap.steamAppDetails?.[steamAppId] as Record<string, unknown> | undefined
+    const genresRaw = Array.isArray(steamData?.genres) ? (steamData?.genres as { description?: string }[]) : []
+    const genreTokens = genresRaw
+      .map((g) => normalizeToken(String(g?.description || '')))
+      .filter(Boolean)
+    for (const g of genreTokens) {
+      for (const rule of CATEGORY_BY_GENRE_TOKEN) {
+        if (rule.tokens.some((t) => g.includes(normalizeToken(t)))) return rule.key
+      }
+    }
+  }
+
+  const titleNorm = normalizeToken(game.title)
+  for (const rule of CATEGORY_BY_TITLE_HINT) {
+    if (rule.tokens.some((t) => titleNorm.includes(normalizeToken(t)))) return rule.key
+  }
+
+  return genreLabelFor(game.title)
 }
 
 function buildFallbackGamePayloadFromSnapshot(
@@ -452,6 +509,21 @@ export async function fetchAllKnownGames(maxGames = 2000): Promise<Game[]> {
     uniq.set(k, g)
   }
   return [...uniq.values()].slice(0, maxGames)
+}
+
+export async function fetchGamesByCategory(categoryKey: string, maxGames = 300): Promise<Game[]> {
+  const all = await fetchAllKnownGames(5000)
+  if (!DEMO_SNAPSHOT_MODE) {
+    return all.filter((g) => genreLabelFor(g.title) === categoryKey).slice(0, maxGames)
+  }
+  const snap = await getDemoSnapshot()
+  const out: Game[] = []
+  for (const g of all) {
+    if (inferCategoryKeyFromSnapshotGame(g, snap) !== categoryKey) continue
+    out.push(g)
+    if (out.length >= maxGames) break
+  }
+  return out
 }
 
 export async function searchGames(title: string, limit = 20): Promise<Game[]> {

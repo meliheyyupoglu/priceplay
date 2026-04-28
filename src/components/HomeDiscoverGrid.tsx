@@ -27,7 +27,6 @@ export function HomeDiscoverGrid({ games }: Props) {
               →
             </span>
           </h2>
-          <p className="home-deals-strip-sub muted">Rastgele 25 oyun</p>
         </div>
       </div>
 

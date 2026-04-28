@@ -54,7 +54,7 @@ export function BrowseListPage() {
         : k === 'new-releases'
           ? 'Çıkış tarihi bilinen oyunlar arasından en yeni tarihe göre sıralanır.'
           : k === 'discover-all'
-            ? 'Veri setindeki tum oyunlar.'
+            ? null
           : null
 
   useEffect(() => {
@@ -100,7 +100,7 @@ export function BrowseListPage() {
           {subtitle}
         </p>
       )}
-      {!loading && !err && (
+      {!loading && !err && k !== 'discover-all' && (
         <p className="muted" style={{ marginTop: 8 }}>
           {games.length} oyun listeleniyor.
         </p>

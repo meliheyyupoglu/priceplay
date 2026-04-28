@@ -27,7 +27,7 @@ export function HomeGameDealsCarousel({ games }: Props) {
               →
             </span>
           </h2>
-          <p className="home-deals-strip-sub muted">Sadece 0$ olan oyunlar</p>
+          <p className="home-deals-strip-sub muted">0 dolara düşen oyunlar</p>
         </div>
       </div>
 

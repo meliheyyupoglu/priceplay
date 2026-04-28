@@ -2,13 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { PageBack } from '../components/PageBack'
 import { FavoritesLoginHint } from '../components/FavoritesLoginHint'
-import { fetchPopularGames } from '../api/cheapshark'
+import { fetchGamesByCategory } from '../api/cheapshark'
 import type { Game } from '../types'
 import { GameCard } from '../components/GameCard'
 import { fetchBrowseCategories } from '../api/browseApi'
 import type { BrowseCategory } from '../lib/browseCategories'
 import { FALLBACK_BROWSE_CATEGORIES } from '../lib/browseCategories'
-import { genreLabelFor } from '../lib/genreTags'
 
 export function CategoryGamesPage() {
   const { key } = useParams<{ key: string }>()
@@ -40,18 +39,7 @@ export function CategoryGamesPage() {
       setLoading(true)
       setErr(null)
       try {
-        const popular = await fetchPopularGames(20)
-        const filtered: Game[] = []
-        const seen = new Set<string>()
-        for (const g of popular) {
-          const k = g.gameId || g.title
-          if (!k || seen.has(k)) continue
-          seen.add(k)
-          if (genreLabelFor(g.title) === categoryKey) {
-            filtered.push(g)
-            if (filtered.length >= 100) break
-          }
-        }
+        const filtered = await fetchGamesByCategory(categoryKey, 300)
         if (!cancelled) setGames(filtered)
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Yükleme hatası')
