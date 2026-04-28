@@ -813,6 +813,10 @@ app.get("/api/cheapshark/deals", expensiveReadLimiter, async (req, res) => {
     });
     res.json(data);
   } catch (error) {
+    if (error?.code === "CHEAPSHARK_CACHE_MISS") {
+      res.set("X-CheapShark-Cache", "miss");
+      return res.json([]);
+    }
     res.status(cheapsharkRouteErrorStatus(error)).json({
       error: "Failed to fetch CheapShark deals",
       detail: error.message,
@@ -853,6 +857,10 @@ app.get("/api/cheapshark/stores", expensiveReadLimiter, async (req, res) => {
     });
     res.json(data);
   } catch (error) {
+    if (error?.code === "CHEAPSHARK_CACHE_MISS") {
+      res.set("X-CheapShark-Cache", "miss");
+      return res.json([]);
+    }
     res.status(cheapsharkRouteErrorStatus(error)).json({
       error: "Failed to fetch CheapShark stores",
       detail: error.message,
