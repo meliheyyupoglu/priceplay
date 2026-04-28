@@ -20,6 +20,12 @@ export function SearchPage() {
       setLoading(false)
       return
     }
+    if (q.trim().length < 2) {
+      setGames([])
+      setErr('En az 2 karakter gir.')
+      setLoading(false)
+      return
+    }
     let cancelled = false
     ;(async () => {
       setLoading(true)

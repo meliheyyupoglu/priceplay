@@ -540,32 +540,24 @@ textarea {
   left: 50%;
   bottom: 14px;
   transform: translateX(-50%);
-  width: min(88%, 220px);
-  background: #fff;
-  border-radius: 3px;
-  padding: 9px 12px;
+  width: min(90%, 260px);
+  border-radius: 10px;
+  padding: 10px 14px;
   text-align: center;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  background: linear-gradient(135deg, rgba(14, 22, 40, 0.92), rgba(22, 40, 68, 0.92));
+  border: 1px solid rgba(94, 234, 212, 0.38);
+  box-shadow: 0 8px 20px rgba(12, 22, 38, 0.6);
+  backdrop-filter: blur(3px);
 }
 
 .steam-browse-label > span:first-of-type {
   display: block;
-  font-size: 0.76rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  color: #312e81;
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #8ff7e5;
   line-height: 1.2;
-}
-
-.steam-browse-blurb {
-  display: block;
-  margin-top: 5px;
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0;
-  color: #64748b;
-  line-height: 1.35;
-  text-transform: none;
+  text-shadow: 0 2px 8px rgba(7, 13, 27, 0.7);
 }
 
 .steam-browse-arrow {

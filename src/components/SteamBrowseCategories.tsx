@@ -128,6 +128,18 @@ function CategorySteamTile({ category: c, thumbs }: { category: BrowseCategory; 
   }
   const slots: (string | null)[] = []
   for (let i = 0; i < 5; i++) slots.push(merged[i] ?? null)
+  const titleMap: Record<string, string> = {
+    Action: 'AKSİYON',
+    Adventure: 'MACERA',
+    RPG: 'RPG',
+    Strategy: 'STRATEJİ',
+    Shooter: 'NİŞANCI',
+    Indie: 'BAĞIMSIZ',
+    Simulation: 'SİMÜLASYON',
+    Sports: 'SPOR',
+    Racing: 'YARIŞ',
+  }
+  const titleText = titleMap[c.keyEn] ?? c.titleTr
 
   return (
     <Link to={`/category/${encodeURIComponent(c.keyEn)}`} className="steam-browse-tile">
@@ -145,8 +157,7 @@ function CategorySteamTile({ category: c, thumbs }: { category: BrowseCategory; 
         )}
         <div className="steam-browse-bluewash" aria-hidden />
         <div className="steam-browse-label">
-          <span>{c.titleTr}</span>
-          {c.blurb && <span className="steam-browse-blurb">{c.blurb}</span>}
+          <span>{titleText}</span>
         </div>
       </div>
     </Link>

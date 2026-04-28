@@ -13,6 +13,24 @@ CheapShark isteklerini tek noktadan geciren, cache/retry/rate-limit yapan ara ba
 4. Server calistir:
    - `npm run dev`
 
+## Onerilen mimari ayari (env)
+
+Bu kombinasyon ana sayfa/kategoriyi stabil tutar, arama/detayda kontrollu canli cekim verir:
+
+- `CHEAPSHARK_UPSTREAM_ENABLED=1`
+- `CHEAPSHARK_BACKGROUND_REFRESH=0`
+- `CHEAPSHARK_ALLOW_UPSTREAM_GAMES_ID=1`
+- `CHEAPSHARK_ALLOW_UPSTREAM_GAMES_TITLE=1`
+- `STEAM_UPSTREAM_ENABLED=0`
+- `CHEAPSHARK_DAILY_REFRESH_CRON=0 5 * * *`
+- `CACHE_TTL_SECONDS=86400`
+
+Ek korumalar:
+
+- IP bazli limitler: `EXPENSIVE_READS_PER_MINUTE`, `SEARCH_REQUESTS_PER_MINUTE`
+- Arama min karakter: `SEARCH_MIN_QUERY_LENGTH`
+- Upstream timeout/retry/backoff: `UPSTREAM_TIMEOUT_MS`, `UPSTREAM_MAX_RETRIES`, `UPSTREAM_GAME_DETAIL_EXTRA_RETRIES`, `UPSTREAM_BACKOFF_BASE_MS`, `MAX_RETRY_AFTER_MS`
+
 ## Cache ayari
 
 - Varsayilan CheapShark cache: `86400` saniye (24 saat); 429 icin onerilir.
@@ -34,12 +52,12 @@ CheapShark isteklerini tek noktadan geciren, cache/retry/rate-limit yapan ara ba
 
 ### Warm-up (konferans)
 
-1. `.env` icine `WARMUP_SECRET` ekle (rastgele uzun bir string). Istege bagli: `WARMUP_MAX_GAME_IDS` (varsayilan 24, en fazla 80) — populer listenin ilk sayfasindan kac oyun icin `/games?id=` cagrilacagi. Istege bagli: **`WARMUP_SEARCH_TITLES`** (virgulle, varsayilan `elden,portal,gta`) — `/games?title=` ornekleri.
+1. `.env` icine `WARMUP_SECRET` ekle (rastgele uzun bir string). Istege bagli: `WARMUP_MAX_GAME_IDS` (onerilen 200+, en fazla 400) — populer listenin ilk sayfasindan kac oyun icin `/games?id=` cagrilacagi. Istege bagli: **`WARMUP_SEARCH_TITLES`** (virgulle, varsayilan `elden,portal,gta`) — `/games?title=` ornekleri. Istege bagli: `WARMUP_CATEGORY_TITLES` (or. `action,adventure,rpg,...`) — kategori prefill aramalari.
 2. Sunucuyu baslat.
 3. Yerelde: `npm run warmup` (script `WARMUP_BASE_URL` ile hedefi degistirebilir, varsayilan `http://127.0.0.1:3000`).
 4. Veya HTTP: `POST /api/admin/warmup-cheapshark` veya **`POST /api/admin/refresh-cheapshark`** (aynı is) + baslik `X-Warmup-Secret: <ayni>` veya JSON `{ "secret": "..." }`.
 
-Bu cagrilar `stores`, populer/indirimli `deals` sayfalari (0–3), arama ornekleri (`WARMUP_SEARCH_TITLES`) ve populer ilk sayfadaki oyun ID’leri icin `/games` onbellegini doldurur; ardindan disk stale dosyasi yazilir.
+Bu cagrilar `stores`, populer/indirimli/release `deals` sayfalari (genis kapsam), arama ornekleri (`WARMUP_SEARCH_TITLES`), kategori aramalari (`WARMUP_CATEGORY_TITLES`) ve populer ilk sayfadaki oyun ID’leri icin `/games` onbellegini doldurur; ardindan disk stale dosyasi yazilir.
 
 ## Endpointler
 

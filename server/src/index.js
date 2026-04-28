@@ -27,6 +27,20 @@ const CACHE_TTL_SECONDS = Number(process.env.CACHE_TTL_SECONDS || 86400);
 const UPSTREAM_MIN_INTERVAL_MS = Number(process.env.UPSTREAM_MIN_INTERVAL_MS || 450);
 /** 429 Retry-After saniye cok buyukse (or. 3600) warm-up/event loop kilitlenmesin. */
 const MAX_RETRY_AFTER_MS = Number(process.env.MAX_RETRY_AFTER_MS || 8_000);
+/** Upstream timeout / retry kontrolleri */
+const UPSTREAM_TIMEOUT_MS = Math.max(1_000, Number(process.env.UPSTREAM_TIMEOUT_MS || 18_000));
+const UPSTREAM_MAX_RETRIES = Math.max(0, Number(process.env.UPSTREAM_MAX_RETRIES || 2));
+const UPSTREAM_GAME_DETAIL_EXTRA_RETRIES = Math.max(
+  0,
+  Number(process.env.UPSTREAM_GAME_DETAIL_EXTRA_RETRIES || 2)
+);
+const UPSTREAM_BACKOFF_BASE_MS = Math.max(100, Number(process.env.UPSTREAM_BACKOFF_BASE_MS || 500));
+/** Arama korumasi */
+const SEARCH_MIN_QUERY_LENGTH = Math.max(2, Number(process.env.SEARCH_MIN_QUERY_LENGTH || 2));
+const CHEAPSHARK_ALLOW_UPSTREAM_GAMES_ID =
+  String(process.env.CHEAPSHARK_ALLOW_UPSTREAM_GAMES_ID ?? "1").trim() !== "0";
+const CHEAPSHARK_ALLOW_UPSTREAM_GAMES_TITLE =
+  String(process.env.CHEAPSHARK_ALLOW_UPSTREAM_GAMES_TITLE ?? "1").trim() !== "0";
 /** `0` = kullanici API isteklerinde CheapShark'a gitme; sadece bellek/disk. Doldurma: warmup veya CHEAPSHARK_DAILY_REFRESH_CRON. */
 const CHEAPSHARK_UPSTREAM_ENABLED =
   String(process.env.CHEAPSHARK_UPSTREAM_ENABLED ?? "1").trim() !== "0";
@@ -49,6 +63,14 @@ const WARMUP_SEARCH_TITLES = String(process.env.WARMUP_SEARCH_TITLES || "elden,p
   .map((s) => s.trim())
   .filter(Boolean)
   .slice(0, 8);
+const WARMUP_CATEGORY_TITLES = String(
+  process.env.WARMUP_CATEGORY_TITLES ||
+    "action,adventure,rpg,strategy,shooter,indie,simulation,sports,racing"
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean)
+  .slice(0, 24);
 
 const dataDir = path.join(__dirname, "..", "data");
 const usersFile = path.join(dataDir, "users.json");
@@ -71,6 +93,11 @@ const UPSTREAM_BACKGROUND_REFRESH_MS = 90_000;
 const steamAppDetailsCache = new Map();
 const STEAM_APPDETAILS_TTL_MS = 15 * 60 * 1000;
 const STEAM_APPDETAILS_MAX_KEYS = 500;
+const STEAM_UPSTREAM_ENABLED =
+  String(process.env.STEAM_UPSTREAM_ENABLED ?? "0").trim() !== "0";
+/** Ayni anahtar icin tek upstream cagrisi */
+const cheapsharkInflight = new Map();
+const steamInflight = new Map();
 
 /** Sunucu yeniden baslayinca 429 oncesi son CheapShark yanitlari */
 const CHEAPSHARK_STALE_DISK = path.join(dataDir, "cheapshark_upstream_stale.json");
@@ -90,6 +117,35 @@ const apiLimiter = rateLimit({
 });
 
 app.use("/api", apiLimiter);
+
+const expensiveReadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: Math.max(20, Number(process.env.EXPENSIVE_READS_PER_MINUTE || 90)),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many expensive requests, please retry shortly." },
+});
+
+const searchLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: Math.max(8, Number(process.env.SEARCH_REQUESTS_PER_MINUTE || 35)),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many search requests, please retry shortly." },
+});
+
+function routeTag(routePath, qNorm) {
+  if (routePath === "/games") {
+    if (String(qNorm.id || "").trim()) return "games:id";
+    if (String(qNorm.title || "").trim()) return "games:title";
+  }
+  return routePath;
+}
+
+function logUpstream(event, detail) {
+  const payload = typeof detail === "object" && detail !== null ? JSON.stringify(detail) : String(detail);
+  console.log(`[UPSTREAM][${event}] ${payload}`);
+}
 
 function initFirebaseAdmin() {
   if (!FIREBASE_SERVICE_ACCOUNT_PATH) {
@@ -346,37 +402,65 @@ function snapshotFallbackForRoute(routePath, qNorm) {
 
 async function fetchUpstreamCheapshark(routePath, qNorm, cacheKey) {
   const url = `${CHEAPSHARK_BASE_URL}${routePath}`;
-  /** Tek oyun sayfası sık 429; önbellekte olmayan `id=` için biraz daha sabırlı dene */
-  const isGameDetail =
-    routePath === "/games" && String(qNorm.id ?? "").trim() !== "" && String(qNorm.title ?? "").trim() === "";
-  const maxAttempts = isGameDetail ? 7 : 4;
-  let delayMs = isGameDetail ? 900 : 500;
+  const isGameDetail = routePath === "/games" && String(qNorm.id || "").trim() !== "";
+  const maxAttempts =
+    1 + UPSTREAM_MAX_RETRIES + (isGameDetail ? UPSTREAM_GAME_DETAIL_EXTRA_RETRIES : 0);
+  let delayMs = UPSTREAM_BACKOFF_BASE_MS;
   let lastError = null;
+  const tag = routeTag(routePath, qNorm);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       await waitForUpstreamSlot();
+      const started = Date.now();
+      logUpstream("call_start", {
+        tag,
+        attempt,
+        maxAttempts,
+        query: qNorm,
+      });
       const response = await axios.get(url, {
         params: Object.keys(qNorm).length ? qNorm : undefined,
-        timeout: 18000,
+        timeout: UPSTREAM_TIMEOUT_MS,
         headers: {
           "User-Agent": "GamePriceProxy/1.0",
           Accept: "application/json",
         },
       });
       setCached(cacheKey, response.data);
+      logUpstream("call_success", {
+        tag,
+        attempt,
+        status: response.status,
+        elapsedMs: Date.now() - started,
+      });
       return response.data;
     } catch (error) {
       lastError = error;
       const status = error.response?.status;
       const retryAfterSec = Number(error.response?.headers?.["retry-after"]);
       const canRetry = status === 429 || (status >= 500 && status <= 599);
+      const isTimeout = error.code === "ECONNABORTED";
+      logUpstream("call_fail", {
+        tag,
+        attempt,
+        status: status ?? null,
+        timeout: isTimeout,
+        code: error.code || null,
+        message: error.message || String(error),
+      });
       if (canRetry && attempt < maxAttempts) {
         const fromHeader =
           Number.isFinite(retryAfterSec) && retryAfterSec > 0
             ? Math.min(retryAfterSec * 1000, MAX_RETRY_AFTER_MS)
             : null;
         const retryDelay = fromHeader != null ? fromHeader : delayMs;
+        logUpstream("call_retry", {
+          tag,
+          attempt,
+          nextAttempt: attempt + 1,
+          waitMs: retryDelay,
+        });
         await sleep(retryDelay);
         delayMs *= 2;
       }
@@ -394,7 +478,37 @@ async function fetchUpstreamCheapshark(routePath, qNorm, cacheKey) {
     return stale;
   }
 
+  logUpstream("call_exhausted", {
+    tag,
+    maxAttempts,
+    status: lastError?.response?.status ?? null,
+    message: lastError?.message || "Upstream unavailable",
+  });
   throw lastError || new Error("Upstream unavailable");
+}
+
+function runSingleflight(inflightMap, key, producer) {
+  const existing = inflightMap.get(key);
+  if (existing) return existing;
+  const p = Promise.resolve()
+    .then(() => producer())
+    .finally(() => {
+      if (inflightMap.get(key) === p) inflightMap.delete(key);
+    });
+  inflightMap.set(key, p);
+  return p;
+}
+
+function shouldAllowLiveFetchOnMiss(routePath, qNorm, forceUpstream) {
+  if (forceUpstream) return true;
+  if (CHEAPSHARK_UPSTREAM_ENABLED) return true;
+  if (routePath === "/games") {
+    const hasId = String(qNorm.id || "").trim() !== "";
+    const hasTitle = String(qNorm.title || "").trim() !== "";
+    if (hasId && CHEAPSHARK_ALLOW_UPSTREAM_GAMES_ID) return true;
+    if (hasTitle && CHEAPSHARK_ALLOW_UPSTREAM_GAMES_TITLE) return true;
+  }
+  return false;
 }
 
 async function cheapSharkGet(routePath, query, options = {}) {
@@ -423,15 +537,17 @@ async function cheapSharkGet(routePath, query, options = {}) {
     return soft;
   }
 
-  if (!CHEAPSHARK_UPSTREAM_ENABLED && !forceUpstream) {
+  if (!shouldAllowLiveFetchOnMiss(routePath, qNorm, forceUpstream)) {
     const err = new Error(
-      "Bu anahtar icin onbellek yok ve CheapShark upstream kapali (CHEAPSHARK_UPSTREAM_ENABLED=0). Warmup veya gunluk cron ile doldur."
+      "Bu anahtar icin onbellek yok ve canli upstream bu rota icin kapali. Warmup veya gunluk cron ile doldur."
     );
     err.code = "CHEAPSHARK_CACHE_MISS";
     throw err;
   }
 
-  return fetchUpstreamCheapshark(routePath, qNorm, cacheKey);
+  return runSingleflight(cheapsharkInflight, cacheKey, () =>
+    fetchUpstreamCheapshark(routePath, qNorm, cacheKey)
+  );
 }
 
 function gameIdsFromDealsPayload(data) {
@@ -477,7 +593,7 @@ async function runCheapSharkWarmup(opts) {
 
   await run("stores", () => cheapSharkGet("/stores", {}, { forceUpstream: true }));
 
-  for (let page = 0; page < 4; page += 1) {
+  for (let page = 0; page < 10; page += 1) {
     await run(`deals_popular_p${page}`, () =>
       cheapSharkGet(
         "/deals",
@@ -491,7 +607,7 @@ async function runCheapSharkWarmup(opts) {
     );
   }
 
-  for (let page = 0; page < 4; page += 1) {
+  for (let page = 0; page < 10; page += 1) {
     await run(`deals_sale_p${page}`, () =>
       cheapSharkGet(
         "/deals",
@@ -506,10 +622,31 @@ async function runCheapSharkWarmup(opts) {
     );
   }
 
+  for (let page = 0; page < 8; page += 1) {
+    await run(`deals_release_p${page}`, () =>
+      cheapSharkGet(
+        "/deals",
+        {
+          sortBy: "Release",
+          pageSize: "60",
+          pageNumber: String(page),
+        },
+        { forceUpstream: true }
+      )
+    );
+  }
+
   for (let si = 0; si < WARMUP_SEARCH_TITLES.length; si += 1) {
     const title = WARMUP_SEARCH_TITLES[si];
     await run(`games_search_${si}`, () =>
       cheapSharkGet("/games", { title, limit: "10" }, { forceUpstream: true })
+    );
+  }
+
+  for (let ci = 0; ci < WARMUP_CATEGORY_TITLES.length; ci += 1) {
+    const title = WARMUP_CATEGORY_TITLES[ci];
+    await run(`category_search_${ci}`, () =>
+      cheapSharkGet("/games", { title, limit: "20" }, { forceUpstream: true })
     );
   }
 
@@ -547,8 +684,13 @@ app.get("/health", (_req, res) => {
     staleOnlyKeys,
     staleDiskFile: CHEAPSHARK_STALE_DISK,
     cheapsharkUpstreamEnabled: CHEAPSHARK_UPSTREAM_ENABLED,
+    cheapsharkAllowUpstreamGamesId: CHEAPSHARK_ALLOW_UPSTREAM_GAMES_ID,
+    cheapsharkAllowUpstreamGamesTitle: CHEAPSHARK_ALLOW_UPSTREAM_GAMES_TITLE,
     cheapsharkBackgroundRefresh: CHEAPSHARK_BACKGROUND_REFRESH,
     cheapsharkDailyRefreshCron: CHEAPSHARK_DAILY_REFRESH_CRON || null,
+    cheapsharkInflight: cheapsharkInflight.size,
+    steamUpstreamEnabled: STEAM_UPSTREAM_ENABLED,
+    steamInflight: steamInflight.size,
   });
 });
 
@@ -562,7 +704,10 @@ app.get("/", (_req, res) => {
     browseCategories: "/api/browse/categories",
     warmup: WARMUP_SECRET ? "POST /api/admin/warmup-cheapshark (X-Warmup-Secret)" : null,
     cheapsharkUpstreamEnabled: CHEAPSHARK_UPSTREAM_ENABLED,
+    cheapsharkAllowUpstreamGamesId: CHEAPSHARK_ALLOW_UPSTREAM_GAMES_ID,
+    cheapsharkAllowUpstreamGamesTitle: CHEAPSHARK_ALLOW_UPSTREAM_GAMES_TITLE,
     cheapsharkBackgroundRefresh: CHEAPSHARK_BACKGROUND_REFRESH,
+    steamUpstreamEnabled: STEAM_UPSTREAM_ENABLED,
   });
 });
 
@@ -571,7 +716,7 @@ app.get("/api/browse/categories", (_req, res) => {
 });
 
 /** Tarayıcı CORS yüzünden Steam’e gidemez; prod’da Vite bu uç üzerinden çağırır. */
-app.get("/api/steam/appdetails", async (req, res) => {
+app.get("/api/steam/appdetails", expensiveReadLimiter, async (req, res) => {
   const qNorm = normalizeQueryForCache(req.query);
   const cacheKey = buildCacheKey("__steamAppDetails", qNorm);
   const now = Date.now();
@@ -579,17 +724,29 @@ app.get("/api/steam/appdetails", async (req, res) => {
   if (hit && hit.expiresAt > now) {
     return res.json(hit.value);
   }
-  try {
-    const r = await axios.get("https://store.steampowered.com/api/appdetails", {
-      params: Object.keys(qNorm).length ? qNorm : undefined,
-      timeout: 22000,
-      headers: {
-        Accept: "application/json",
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 PricePlay/1.0",
-      },
-      validateStatus: () => true,
+  if (!STEAM_UPSTREAM_ENABLED) {
+    if (hit?.value != null) {
+      res.set("X-Steam-Cache", "stale");
+      return res.json(hit.value);
+    }
+    return res.status(503).json({
+      error: "STEAM_CACHE_MISS",
+      detail: "Steam upstream disabled; only warmed cache is served.",
     });
+  }
+  try {
+    const r = await runSingleflight(steamInflight, cacheKey, () =>
+      axios.get("https://store.steampowered.com/api/appdetails", {
+        params: Object.keys(qNorm).length ? qNorm : undefined,
+        timeout: UPSTREAM_TIMEOUT_MS,
+        headers: {
+          Accept: "application/json",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 PricePlay/1.0",
+        },
+        validateStatus: () => true,
+      })
+    );
     const data = r.data;
     if (typeof data === "object" && data !== null) {
       steamAppDetailsCache.set(cacheKey, { value: data, expiresAt: now + STEAM_APPDETAILS_TTL_MS });
@@ -613,7 +770,7 @@ function cheapsharkRouteErrorStatus(err) {
   return 503;
 }
 
-app.get("/api/cheapshark/deals", async (req, res) => {
+app.get("/api/cheapshark/deals", expensiveReadLimiter, async (req, res) => {
   try {
     const data = await cheapSharkGet("/deals", req.query);
     res.json(data);
@@ -625,8 +782,18 @@ app.get("/api/cheapshark/deals", async (req, res) => {
   }
 });
 
-app.get("/api/cheapshark/games", async (req, res) => {
+app.get("/api/cheapshark/games", (req, res, next) => {
+  const title = String(req.query?.title || "").trim();
+  if (title) return searchLimiter(req, res, next);
+  return expensiveReadLimiter(req, res, next);
+}, async (req, res) => {
   try {
+    const title = String(req.query?.title || "").trim();
+    if (title && title.length < SEARCH_MIN_QUERY_LENGTH) {
+      return res.status(400).json({
+        error: `title must be at least ${SEARCH_MIN_QUERY_LENGTH} characters`,
+      });
+    }
     const data = await cheapSharkGet("/games", req.query);
     res.json(data);
   } catch (error) {
@@ -637,7 +804,7 @@ app.get("/api/cheapshark/games", async (req, res) => {
   }
 });
 
-app.get("/api/cheapshark/stores", async (req, res) => {
+app.get("/api/cheapshark/stores", expensiveReadLimiter, async (req, res) => {
   try {
     const data = await cheapSharkGet("/stores", req.query);
     res.json(data);

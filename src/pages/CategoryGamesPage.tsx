@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { PageBack } from '../components/PageBack'
 import { FavoritesLoginHint } from '../components/FavoritesLoginHint'
-import { fetchPopularGames } from '../api/cheapshark'
+import { fetchPopularGames, searchGames } from '../api/cheapshark'
 import type { Game } from '../types'
 import { GameCard } from '../components/GameCard'
 import { fetchBrowseCategories } from '../api/browseApi'
@@ -11,6 +11,18 @@ import { FALLBACK_BROWSE_CATEGORIES } from '../lib/browseCategories'
 import { genreLabelFor } from '../lib/genreTags'
 
 export function CategoryGamesPage() {
+  const categoryQueries: Record<string, string[]> = {
+    Action: ['action', 'combat', 'war'],
+    Adventure: ['adventure', 'story', 'quest'],
+    RPG: ['rpg', 'fantasy', 'open world'],
+    Strategy: ['strategy', 'tactics', 'management'],
+    Shooter: ['shooter', 'fps', 'sniper'],
+    Indie: ['indie', 'roguelike', 'pixel'],
+    Simulation: ['simulation', 'simulator', 'tycoon'],
+    Sports: ['sports', 'football', 'basketball'],
+    Racing: ['racing', 'race', 'motorsport'],
+  }
+
   const { key } = useParams<{ key: string }>()
   const categoryKey = decodeURIComponent(key || '')
   const [categories, setCategories] = useState<BrowseCategory[]>(FALLBACK_BROWSE_CATEGORIES)
@@ -52,12 +64,18 @@ export function CategoryGamesPage() {
             if (filtered.length >= 100) break
           }
         }
+        const queries = categoryQueries[categoryKey] ?? [categoryKey.toLowerCase()]
         if (filtered.length < 30) {
-          for (const g of popular) {
-            const k = g.gameId || g.title
-            if (!k) continue
-            if (filtered.some((x) => (x.gameId || x.title) === k)) continue
-            filtered.push(g)
+          for (const q of queries) {
+            const searched = await searchGames(q, 30)
+            for (const g of searched) {
+              const k = g.gameId || g.title
+              if (!k || seen.has(k)) continue
+              if (genreLabelFor(g.title) !== categoryKey) continue
+              seen.add(k)
+              filtered.push(g)
+              if (filtered.length >= 100) break
+            }
             if (filtered.length >= 100) break
           }
         }
