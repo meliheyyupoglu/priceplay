@@ -546,6 +546,27 @@ function snapshotFallbackForRoute(routePath, qNorm) {
   return null;
 }
 
+function classifyCheapsharkUpstreamFailure(error) {
+  const status = Number(error?.response?.status || 0) || null;
+  const url = String(error?.config?.url || "");
+  const code = String(error?.code || "");
+  const message = String(error?.message || "");
+  const viaAllOrigins = url.includes("api.allorigins.win");
+  let source = "unknown";
+
+  if (status === 429) {
+    source = "cheapshark";
+  } else if (!status && (code || message)) {
+    source = viaAllOrigins ? "allorigins_network" : "network";
+  } else if (status >= 500 && status <= 599) {
+    source = viaAllOrigins ? "allorigins_or_cheapshark" : "cheapshark";
+  } else if (viaAllOrigins) {
+    source = "allorigins";
+  }
+
+  return { source, status, code: code || null, viaAllOrigins };
+}
+
 function buildCheapsharkProxiedUrl(routePath, qNorm) {
   const originalUrl = new URL(`${CHEAPSHARK_BASE_URL}${routePath}`);
   for (const [key, value] of Object.entries(qNorm || {})) {
@@ -654,7 +675,10 @@ async function fetchUpstreamCheapshark(routePath, qNorm, cacheKey, options = {})
     status: lastError?.response?.status ?? null,
     message: lastError?.message || "Upstream unavailable",
   });
-  throw lastError || new Error("Upstream unavailable");
+  const meta = classifyCheapsharkUpstreamFailure(lastError);
+  const enriched = lastError || new Error("Upstream unavailable");
+  enriched.upstreamMeta = meta;
+  throw enriched;
 }
 
 function runSingleflight(inflightMap, key, producer) {
@@ -969,6 +993,15 @@ function cheapsharkRouteErrorStatus(err) {
   return 503;
 }
 
+function applyCheapsharkUpstreamHeaders(res, err) {
+  const meta = err?.upstreamMeta || classifyCheapsharkUpstreamFailure(err);
+  const source = String(meta?.source || "unknown");
+  const status = Number(meta?.status || 0) || null;
+  res.set("X-Upstream-Source", source);
+  if (status != null) res.set("X-Upstream-Status", String(status));
+  return meta;
+}
+
 app.get("/api/cheapshark/deals", expensiveReadLimiter, async (req, res) => {
   try {
     const data = await cheapSharkGet("/deals", req.query, {
@@ -981,9 +1014,11 @@ app.get("/api/cheapshark/deals", expensiveReadLimiter, async (req, res) => {
       res.set("X-CheapShark-Cache", "miss");
       return res.json([]);
     }
+    const upstreamMeta = applyCheapsharkUpstreamHeaders(res, error);
     res.status(cheapsharkRouteErrorStatus(error)).json({
       error: "Failed to fetch CheapShark deals",
       detail: error.message,
+      upstream: upstreamMeta,
     });
   }
 });
@@ -1006,9 +1041,11 @@ app.get("/api/cheapshark/games", (req, res, next) => {
     });
     res.json(data);
   } catch (error) {
+    const upstreamMeta = applyCheapsharkUpstreamHeaders(res, error);
     res.status(cheapsharkRouteErrorStatus(error)).json({
       error: "Failed to fetch CheapShark games",
       detail: error.message,
+      upstream: upstreamMeta,
     });
   }
 });
@@ -1025,9 +1062,11 @@ app.get("/api/cheapshark/stores", expensiveReadLimiter, async (req, res) => {
       res.set("X-CheapShark-Cache", "miss");
       return res.json([]);
     }
+    const upstreamMeta = applyCheapsharkUpstreamHeaders(res, error);
     res.status(cheapsharkRouteErrorStatus(error)).json({
       error: "Failed to fetch CheapShark stores",
       detail: error.message,
+      upstream: upstreamMeta,
     });
   }
 });

@@ -11,6 +11,19 @@ const headers = {
   'User-Agent': 'PricePlayWeb/1.0',
 }
 
+async function fetchJsonOrFallback<T>(url: string, fallback: T): Promise<T> {
+  try {
+    const r = await fetch(url, { headers })
+    if (!r.ok) {
+      if (r.status >= 500 || r.status === 429 || r.status === 503) return fallback
+      throw new Error(`CheapShark yanit hatasi: ${r.status}`)
+    }
+    return (await r.json()) as T
+  } catch {
+    return fallback
+  }
+}
+
 function parseGame(raw: Record<string, unknown>): Game | null {
   const gameId =
     String(raw.gameID ?? raw.gameId ?? '')
@@ -176,9 +189,7 @@ export async function fetchStoreNames(): Promise<Record<string, string>> {
   const now = Date.now()
   if (storeNameCache && now - storeNameFetched < STORE_TTL_MS) return storeNameCache
 
-  const r = await fetch(`${CHEAPSHARK_BASE}/stores`, { headers })
-  if (!r.ok) throw new Error(`Mağaza listesi: ${r.status}`)
-  const list = (await r.json()) as unknown[]
+  const list = await fetchJsonOrFallback<unknown[]>(`${CHEAPSHARK_BASE}/stores`, [])
   const map: Record<string, string> = {}
   for (const e of list) {
     if (!e || typeof e !== 'object') continue
@@ -209,9 +220,7 @@ export async function fetchPopularGames(pageCount = 4): Promise<Game[]> {
   const out: Game[] = []
   for (let page = 0; page < pageCount; page++) {
     const url = `${CHEAPSHARK_BASE}/deals?sortBy=Deal%20Rating&pageSize=60&pageNumber=${page}`
-    const r = await fetch(url, { headers })
-    if (!r.ok) throw new Error(`Popüler: ${r.status}`)
-    const data = (await r.json()) as unknown[]
+    const data = await fetchJsonOrFallback<unknown[]>(url, [])
     uniqueDealsToGames(data, seen, out)
     if (page < pageCount - 1) await new Promise((res) => setTimeout(res, 120))
   }
@@ -223,9 +232,7 @@ export async function fetchDiscountedGames(pageCount = 4): Promise<Game[]> {
   const out: Game[] = []
   for (let page = 0; page < pageCount; page++) {
     const url = `${CHEAPSHARK_BASE}/deals?onSale=1&sortBy=Savings&pageSize=60&pageNumber=${page}`
-    const r = await fetch(url, { headers })
-    if (!r.ok) throw new Error(`İndirimli: ${r.status}`)
-    const data = (await r.json()) as unknown[]
+    const data = await fetchJsonOrFallback<unknown[]>(url, [])
     uniqueDealsToGames(data, seen, out)
     if (page < pageCount - 1) await new Promise((res) => setTimeout(res, 120))
   }
@@ -244,9 +251,7 @@ export async function fetchNewReleaseDeals(maxGames = 20, pageCount = 16): Promi
   const sortBy = encodeURIComponent('Release')
   for (let page = 0; page < pageCount; page++) {
     const url = `${CHEAPSHARK_BASE}/deals?sortBy=${sortBy}&pageSize=60&pageNumber=${page}`
-    const r = await fetch(url, { headers })
-    if (!r.ok) throw new Error(`Yeni çıkanlar: ${r.status}`)
-    const data = (await r.json()) as unknown[]
+    const data = await fetchJsonOrFallback<unknown[]>(url, [])
     for (const raw of data) {
       if (!raw || typeof raw !== 'object') continue
       const g = parseGame(raw as Record<string, unknown>)
@@ -279,9 +284,7 @@ export async function fetchHundredPercentFreeDeals(maxGames = 20, maxPages = 10)
   const out: Game[] = []
   for (let page = 0; page < maxPages && out.length < maxGames; page++) {
     const url = `${CHEAPSHARK_BASE}/deals?onSale=1&sortBy=Savings&pageSize=60&pageNumber=${page}`
-    const r = await fetch(url, { headers })
-    if (!r.ok) throw new Error(`Fırsat: ${r.status}`)
-    const data = (await r.json()) as unknown[]
+    const data = await fetchJsonOrFallback<unknown[]>(url, [])
     for (const raw of data) {
       if (!raw || typeof raw !== 'object') continue
       const g = parseGame(raw as Record<string, unknown>)
@@ -306,9 +309,7 @@ export async function fetchHundredPercentFreeDeals(maxGames = 20, maxPages = 10)
 export async function searchGames(title: string, limit = 20): Promise<Game[]> {
   const q = encodeURIComponent(title.trim())
   const url = `${CHEAPSHARK_BASE}/games?title=${q}&limit=${limit}`
-  const r = await fetch(url, { headers })
-  if (!r.ok) throw new Error(`Arama: ${r.status}`)
-  const data = (await r.json()) as unknown[]
+  const data = await fetchJsonOrFallback<unknown[]>(url, [])
   const out: Game[] = []
   for (const e of data) {
     if (!e || typeof e !== 'object') continue
