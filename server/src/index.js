@@ -113,6 +113,7 @@ const apiLimiter = rateLimit({
   max: 400,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => String(req.headers["x-user-id"] || req.ip || "anonymous"),
   message: { error: "Too many requests, please try again in a minute." },
 });
 
@@ -123,6 +124,7 @@ const expensiveReadLimiter = rateLimit({
   max: Math.max(20, Number(process.env.EXPENSIVE_READS_PER_MINUTE || 90)),
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => String(req.headers["x-user-id"] || req.ip || "anonymous"),
   message: { error: "Too many expensive requests, please retry shortly." },
 });
 
@@ -131,6 +133,7 @@ const searchLimiter = rateLimit({
   max: Math.max(8, Number(process.env.SEARCH_REQUESTS_PER_MINUTE || 35)),
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => String(req.headers["x-user-id"] || req.ip || "anonymous"),
   message: { error: "Too many search requests, please retry shortly." },
 });
 
@@ -143,8 +146,14 @@ function routeTag(routePath, qNorm) {
 }
 
 function logUpstream(event, detail) {
-  const payload = typeof detail === "object" && detail !== null ? JSON.stringify(detail) : String(detail);
-  console.log(`[UPSTREAM][${event}] ${payload}`);
+  const payloadObj =
+    typeof detail === "object" && detail !== null ? detail : { detail: String(detail) };
+  const payload = JSON.stringify({
+    timestamp: new Date().toISOString(),
+    event,
+    ...payloadObj,
+  });
+  console.log(`[UPSTREAM][CHEAPSHARK] ${payload}`);
 }
 
 function initFirebaseAdmin() {
@@ -400,7 +409,9 @@ function snapshotFallbackForRoute(routePath, qNorm) {
   return null;
 }
 
-async function fetchUpstreamCheapshark(routePath, qNorm, cacheKey) {
+async function fetchUpstreamCheapshark(routePath, qNorm, cacheKey, options = {}) {
+  const caller = String(options.caller || "unknown_caller");
+  const triggerRoute = String(options.triggerRoute || "unknown_route");
   const url = `${CHEAPSHARK_BASE_URL}${routePath}`;
   const isGameDetail = routePath === "/games" && String(qNorm.id || "").trim() !== "";
   const maxAttempts =
@@ -414,10 +425,13 @@ async function fetchUpstreamCheapshark(routePath, qNorm, cacheKey) {
       await waitForUpstreamSlot();
       const started = Date.now();
       logUpstream("call_start", {
+        endpoint: routePath,
         tag,
+        triggerRoute,
+        caller,
         attempt,
         maxAttempts,
-        query: qNorm,
+        queryParams: qNorm,
       });
       const response = await axios.get(url, {
         params: Object.keys(qNorm).length ? qNorm : undefined,
@@ -429,7 +443,10 @@ async function fetchUpstreamCheapshark(routePath, qNorm, cacheKey) {
       });
       setCached(cacheKey, response.data);
       logUpstream("call_success", {
+        endpoint: routePath,
         tag,
+        triggerRoute,
+        caller,
         attempt,
         status: response.status,
         elapsedMs: Date.now() - started,
@@ -442,7 +459,10 @@ async function fetchUpstreamCheapshark(routePath, qNorm, cacheKey) {
       const canRetry = status === 429 || (status >= 500 && status <= 599);
       const isTimeout = error.code === "ECONNABORTED";
       logUpstream("call_fail", {
+        endpoint: routePath,
         tag,
+        triggerRoute,
+        caller,
         attempt,
         status: status ?? null,
         timeout: isTimeout,
@@ -456,7 +476,10 @@ async function fetchUpstreamCheapshark(routePath, qNorm, cacheKey) {
             : null;
         const retryDelay = fromHeader != null ? fromHeader : delayMs;
         logUpstream("call_retry", {
+          endpoint: routePath,
           tag,
+          triggerRoute,
+          caller,
           attempt,
           nextAttempt: attempt + 1,
           waitMs: retryDelay,
@@ -479,7 +502,10 @@ async function fetchUpstreamCheapshark(routePath, qNorm, cacheKey) {
   }
 
   logUpstream("call_exhausted", {
+    endpoint: routePath,
     tag,
+    triggerRoute,
+    caller,
     maxAttempts,
     status: lastError?.response?.status ?? null,
     message: lastError?.message || "Upstream unavailable",
@@ -501,6 +527,7 @@ function runSingleflight(inflightMap, key, producer) {
 
 function shouldAllowLiveFetchOnMiss(routePath, qNorm, forceUpstream) {
   if (forceUpstream) return true;
+  if (routePath === "/deals" || routePath === "/stores") return false;
   if (CHEAPSHARK_UPSTREAM_ENABLED) return true;
   if (routePath === "/games") {
     const hasId = String(qNorm.id || "").trim() !== "";
@@ -513,6 +540,8 @@ function shouldAllowLiveFetchOnMiss(routePath, qNorm, forceUpstream) {
 
 async function cheapSharkGet(routePath, query, options = {}) {
   const forceUpstream = options.forceUpstream === true;
+  const caller = String(options.caller || "unknown_caller");
+  const triggerRoute = String(options.triggerRoute || "unknown_route");
   const qNorm = normalizeQueryForCache(query);
   const cacheKey = buildCacheKey(routePath, qNorm);
   const cached = getCached(cacheKey);
@@ -531,7 +560,9 @@ async function cheapSharkGet(routePath, query, options = {}) {
       const lastBg = backgroundRefreshAt.get(cacheKey) ?? 0;
       if (Date.now() - lastBg >= UPSTREAM_BACKGROUND_REFRESH_MS) {
         backgroundRefreshAt.set(cacheKey, Date.now());
-        void fetchUpstreamCheapshark(routePath, qNorm, cacheKey).catch(() => {});
+        void fetchUpstreamCheapshark(routePath, qNorm, cacheKey, { caller, triggerRoute }).catch(
+          () => {}
+        );
       }
     }
     return soft;
@@ -546,7 +577,7 @@ async function cheapSharkGet(routePath, query, options = {}) {
   }
 
   return runSingleflight(cheapsharkInflight, cacheKey, () =>
-    fetchUpstreamCheapshark(routePath, qNorm, cacheKey)
+    fetchUpstreamCheapshark(routePath, qNorm, cacheKey, { caller, triggerRoute })
   );
 }
 
@@ -591,7 +622,9 @@ async function runCheapSharkWarmup(opts) {
     }
   };
 
-  await run("stores", () => cheapSharkGet("/stores", {}, { forceUpstream: true }));
+  await run("stores", () =>
+    cheapSharkGet("/stores", {}, { forceUpstream: true, caller: "runCheapSharkWarmup", triggerRoute: "warmup" })
+  );
 
   for (let page = 0; page < 10; page += 1) {
     await run(`deals_popular_p${page}`, () =>
@@ -602,7 +635,7 @@ async function runCheapSharkWarmup(opts) {
           pageSize: "60",
           pageNumber: String(page),
         },
-        { forceUpstream: true }
+        { forceUpstream: true, caller: "runCheapSharkWarmup", triggerRoute: "warmup" }
       )
     );
   }
@@ -617,7 +650,7 @@ async function runCheapSharkWarmup(opts) {
           pageSize: "60",
           pageNumber: String(page),
         },
-        { forceUpstream: true }
+        { forceUpstream: true, caller: "runCheapSharkWarmup", triggerRoute: "warmup" }
       )
     );
   }
@@ -631,7 +664,7 @@ async function runCheapSharkWarmup(opts) {
           pageSize: "60",
           pageNumber: String(page),
         },
-        { forceUpstream: true }
+        { forceUpstream: true, caller: "runCheapSharkWarmup", triggerRoute: "warmup" }
       )
     );
   }
@@ -639,14 +672,14 @@ async function runCheapSharkWarmup(opts) {
   for (let si = 0; si < WARMUP_SEARCH_TITLES.length; si += 1) {
     const title = WARMUP_SEARCH_TITLES[si];
     await run(`games_search_${si}`, () =>
-      cheapSharkGet("/games", { title, limit: "10" }, { forceUpstream: true })
+      cheapSharkGet("/games", { title, limit: "10" }, { forceUpstream: true, caller: "runCheapSharkWarmup", triggerRoute: "warmup" })
     );
   }
 
   for (let ci = 0; ci < WARMUP_CATEGORY_TITLES.length; ci += 1) {
     const title = WARMUP_CATEGORY_TITLES[ci];
     await run(`category_search_${ci}`, () =>
-      cheapSharkGet("/games", { title, limit: "20" }, { forceUpstream: true })
+      cheapSharkGet("/games", { title, limit: "20" }, { forceUpstream: true, caller: "runCheapSharkWarmup", triggerRoute: "warmup" })
     );
   }
 
@@ -661,7 +694,7 @@ async function runCheapSharkWarmup(opts) {
   for (const id of ids) {
     const s = Date.now();
     try {
-      await cheapSharkGet("/games", { id }, { forceUpstream: true });
+      await cheapSharkGet("/games", { id }, { forceUpstream: true, caller: "runCheapSharkWarmup", triggerRoute: "warmup" });
       pushStep(`games_id_${id}`, true, Date.now() - s);
     } catch (e) {
       pushStep(`games_id_${id}`, false, Date.now() - s, e?.message || String(e));
@@ -772,7 +805,10 @@ function cheapsharkRouteErrorStatus(err) {
 
 app.get("/api/cheapshark/deals", expensiveReadLimiter, async (req, res) => {
   try {
-    const data = await cheapSharkGet("/deals", req.query);
+    const data = await cheapSharkGet("/deals", req.query, {
+      caller: "cheapsharkDealsRouteHandler",
+      triggerRoute: req.path,
+    });
     res.json(data);
   } catch (error) {
     res.status(cheapsharkRouteErrorStatus(error)).json({
@@ -794,7 +830,10 @@ app.get("/api/cheapshark/games", (req, res, next) => {
         error: `title must be at least ${SEARCH_MIN_QUERY_LENGTH} characters`,
       });
     }
-    const data = await cheapSharkGet("/games", req.query);
+    const data = await cheapSharkGet("/games", req.query, {
+      caller: "cheapsharkGamesRouteHandler",
+      triggerRoute: req.path,
+    });
     res.json(data);
   } catch (error) {
     res.status(cheapsharkRouteErrorStatus(error)).json({
@@ -806,7 +845,10 @@ app.get("/api/cheapshark/games", (req, res, next) => {
 
 app.get("/api/cheapshark/stores", expensiveReadLimiter, async (req, res) => {
   try {
-    const data = await cheapSharkGet("/stores", req.query);
+    const data = await cheapSharkGet("/stores", req.query, {
+      caller: "cheapsharkStoresRouteHandler",
+      triggerRoute: req.path,
+    });
     res.json(data);
   } catch (error) {
     res.status(cheapsharkRouteErrorStatus(error)).json({
@@ -1334,7 +1376,10 @@ async function sendPushToUser(userId, title, body, data = {}) {
 }
 
 async function fetchCurrentGamePrice(gameId) {
-  const game = await cheapSharkGet("/games", { id: gameId });
+  const game = await cheapSharkGet("/games", { id: gameId }, {
+    caller: "fetchCurrentGamePrice",
+    triggerRoute: "watchlist_or_pricecheck",
+  });
   const deals = Array.isArray(game?.deals) ? game.deals : [];
   let min = null;
   for (const deal of deals) {

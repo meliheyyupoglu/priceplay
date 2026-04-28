@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
-  fetchCuratedFreeToPlayByMetacritic,
   fetchDiscountedGames,
   fetchHundredPercentFreeDeals,
   fetchNewReleaseDeals,
@@ -37,6 +36,11 @@ function buildThumbsByCategory(categories: BrowseCategory[], games: Game[]): Rec
     if (out[label] && out[label].length < 5) out[label].push(t)
   }
   return out
+}
+
+function isNearFree(game: Game): boolean {
+  const p = Number.parseFloat(String(game.cheapest ?? '').replace(',', '.'))
+  return Number.isFinite(p) && p >= 0 && p <= 0.05
 }
 
 export function HomePage() {
@@ -106,19 +110,9 @@ export function HomePage() {
         setPopular(popularPreviewByMetacritic(pUnique, HOME_PREVIEW))
         setDiscounted(dWithoutDeals.slice(0, HOME_PREVIEW))
         setHundredOff(hoUnique)
-        setFreePopular([])
+        const freeFromPopular = pUnique.filter((g) => isNearFree(g) && !hoKeys.has(g.gameId || g.title))
+        setFreePopular(freeFromPopular.slice(0, HOME_FREE_GRID))
         if (!cancelled) setLoading(false)
-
-        void (async () => {
-          try {
-            const fpRaw = await fetchCuratedFreeToPlayByMetacritic(48).catch(() => [] as Game[])
-            if (cancelled) return
-            const fpFiltered = fpRaw.filter((g) => !hoKeys.has(g.gameId || g.title)).slice(0, HOME_FREE_GRID)
-            if (!cancelled) setFreePopular(fpFiltered)
-          } catch {
-            if (!cancelled) setFreePopular([])
-          }
-        })()
 
         try {
           await new Promise((r) => setTimeout(r, 200))
