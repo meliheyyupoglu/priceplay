@@ -552,7 +552,9 @@ async function cheapSharkGet(routePath, query, options = {}) {
   const softRaw = getStaleCache(cacheKey) ?? snapshotFallbackForRoute(routePath, qNorm);
   const soft = isUsableCheapsharkSoft(routePath, softRaw) ? softRaw : null;
   if (soft != null) {
+    const allowBackgroundRoute = routePath !== "/deals" && routePath !== "/stores";
     const allowBg =
+      allowBackgroundRoute &&
       CHEAPSHARK_BACKGROUND_REFRESH &&
       CHEAPSHARK_UPSTREAM_ENABLED &&
       !forceUpstream;
