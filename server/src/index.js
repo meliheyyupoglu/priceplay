@@ -5,6 +5,7 @@ const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 const axios = require("axios");
 const bcrypt = require("bcryptjs");
+const { Pool } = require("pg");
 const { randomUUID } = require("crypto");
 const fs = require("fs/promises");
 const path = require("path");
@@ -53,6 +54,8 @@ const dataDir = path.join(__dirname, "..", "data");
 const usersFile = path.join(dataDir, "users.json");
 const devicesFile = path.join(dataDir, "devices.json");
 const watchlistFile = path.join(dataDir, "watchlist.json");
+const USE_POSTGRES = Boolean(String(process.env.DATABASE_URL || "").trim());
+let pgPool = null;
 
 const cache = new Map();
 /** Son basarili /deals yanitlari (anahtar -> dizi); tam anahtar yoksa turune gore yedek. */
@@ -722,12 +725,123 @@ async function ensureUsersFile() {
   await ensureCollectionFile(usersFile, "users");
 }
 
+async function initUsersDbIfNeeded() {
+  if (!USE_POSTGRES) return;
+  if (pgPool) return;
+  pgPool = new Pool({
+    connectionString: process.env.DATABASE_URL.trim(),
+    max: Number(process.env.PG_POOL_MAX || 5),
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 15_000,
+  });
+  await pgPool.query(`CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL,
+    nickname TEXT NOT NULL UNIQUE,
+    email TEXT NOT NULL UNIQUE,
+    phone TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT
+  )`);
+}
+
+function mapPgUserToApiUser(row) {
+  return {
+    id: row.id,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    nickname: row.nickname,
+    email: row.email,
+    phone: row.phone,
+    passwordHash: row.password_hash,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at ?? null,
+  };
+}
+
+async function migrateUsersFileToDbIfNeeded() {
+  if (!USE_POSTGRES || !pgPool) return;
+  const { rows } = await pgPool.query("SELECT COUNT(*)::int AS n FROM users");
+  const n = Number(rows[0]?.n) || 0;
+  if (n > 0) return;
+  const fileUsers = await readCollection(usersFile, "users");
+  if (!Array.isArray(fileUsers) || fileUsers.length === 0) return;
+  const client = await pgPool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const u of fileUsers) {
+      await client.query(
+        `INSERT INTO users (id, first_name, last_name, nickname, email, phone, password_hash, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          String(u.id || randomUUID()),
+          String(u.firstName || ""),
+          String(u.lastName || ""),
+          String(u.nickname || "").toLowerCase(),
+          String(u.email || "").toLowerCase(),
+          String(u.phone || ""),
+          String(u.passwordHash || ""),
+          String(u.createdAt || new Date().toISOString()),
+          u.updatedAt == null ? null : String(u.updatedAt),
+        ]
+      );
+    }
+    await client.query("COMMIT");
+    console.log(`[Auth] users.json -> Postgres migration tamamlandi (${fileUsers.length} kullanici).`);
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 async function readUsers() {
+  if (USE_POSTGRES && pgPool) {
+    const { rows } = await pgPool.query(
+      `SELECT id, first_name, last_name, nickname, email, phone, password_hash, created_at, updated_at FROM users`
+    );
+    return rows.map(mapPgUserToApiUser);
+  }
   await ensureUsersFile();
   return readCollection(usersFile, "users");
 }
 
 async function writeUsers(users) {
+  if (USE_POSTGRES && pgPool) {
+    const client = await pgPool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM users");
+      for (const u of users) {
+        await client.query(
+          `INSERT INTO users (id, first_name, last_name, nickname, email, phone, password_hash, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [
+            String(u.id || randomUUID()),
+            String(u.firstName || ""),
+            String(u.lastName || ""),
+            String(u.nickname || "").toLowerCase(),
+            String(u.email || "").toLowerCase(),
+            String(u.phone || ""),
+            String(u.passwordHash || ""),
+            String(u.createdAt || new Date().toISOString()),
+            u.updatedAt == null ? null : String(u.updatedAt),
+          ]
+        );
+      }
+      await client.query("COMMIT");
+      return;
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
   await writeCollection(usersFile, "users", users);
 }
 
@@ -793,6 +907,7 @@ app.post("/api/auth/register", async (req, res) => {
     const email = String(req.body?.email || "").trim().toLowerCase();
     const phone = normalizePhone(req.body?.phone);
     const password = String(req.body?.password || "");
+    const confirmPassword = String(req.body?.confirmPassword || "");
 
     if (
       !firstName ||
@@ -816,6 +931,9 @@ app.post("/api/auth/register", async (req, res) => {
       return res.status(400).json({
         error: "Password must include upper, lower and number (min 6)",
       });
+    }
+    if (confirmPassword && confirmPassword !== password) {
+      return res.status(400).json({ error: "Passwords must match" });
     }
 
     if (!isValidTrPhone(phone)) {
@@ -1228,6 +1346,9 @@ async function runPriceCheckCycle() {
 }
 
 async function startServer() {
+  await fs.mkdir(dataDir, { recursive: true });
+  await initUsersDbIfNeeded();
+  await migrateUsersFileToDbIfNeeded();
   await loadStaleFromDisk();
   initFirebaseAdmin();
   cron.schedule(PRICE_CHECK_CRON, async () => {
