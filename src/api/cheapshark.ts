@@ -20,6 +20,7 @@ type DemoSnapshot = {
   free100?: unknown[]
   searches?: Record<string, unknown[]>
   gameDetails?: Record<string, Record<string, unknown>>
+  steamAppDetails?: Record<string, Record<string, unknown>>
 }
 
 const DEMO_SNAPSHOT_MODE = String(import.meta.env.VITE_DEMO_SNAPSHOT_MODE ?? '1').trim() === '1'

@@ -9,6 +9,26 @@ type AppDetailsResponse = Record<
   }
 >
 
+type DemoSnapshotSteam = {
+  steamAppDetails?: Record<string, Record<string, unknown>>
+}
+
+const DEMO_SNAPSHOT_MODE = String(import.meta.env.VITE_DEMO_SNAPSHOT_MODE ?? '1').trim() === '1'
+let demoSnapshotCache: DemoSnapshotSteam | null = null
+
+async function getDemoSnapshot(): Promise<DemoSnapshotSteam> {
+  if (!DEMO_SNAPSHOT_MODE) return {}
+  if (demoSnapshotCache) return demoSnapshotCache
+  const r = await fetch('/demo-snapshot.json', {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  })
+  if (!r.ok) return {}
+  const data = (await r.json()) as DemoSnapshotSteam
+  demoSnapshotCache = data
+  return data
+}
+
 function htmlToPlain(html: string): string {
   if (!html || typeof html !== 'string') return ''
   return html
@@ -48,6 +68,35 @@ export type SteamAppDetailsResult = {
 }
 
 export async function fetchSteamAppDetails(appId: string): Promise<SteamAppDetailsResult | null> {
+  if (DEMO_SNAPSHOT_MODE) {
+    const snap = await getDemoSnapshot()
+    const d = snap.steamAppDetails?.[String(appId)]
+    if (!d || typeof d !== 'object') return null
+    const shortHtml = d.short_description != null ? String(d.short_description) : ''
+    const aboutHtml = d.about_the_game != null ? String(d.about_the_game) : ''
+    const shortPlain = shortHtml ? htmlToPlain(shortHtml) : ''
+    const detailedPlain = aboutHtml ? htmlToPlain(aboutHtml) : ''
+
+    const genresRaw = Array.isArray(d.genres) ? (d.genres as { description?: string }[]) : []
+    const genres = genresRaw.map((g) => String(g.description || '').trim()).filter(Boolean)
+
+    const pc = parsePcRequirements(d.pc_requirements)
+    const header = d.header_image != null ? String(d.header_image) : null
+    const po = (d.price_overview as SteamPriceOverview | undefined) ?? null
+    const description = shortPlain || (detailedPlain ? detailedPlain.slice(0, 500) : '') || null
+    return {
+      name: d.name != null ? String(d.name) : undefined,
+      shortDescription: shortPlain || null,
+      detailedDescriptionPlain: detailedPlain || null,
+      headerImage: header,
+      price: po,
+      genres,
+      pcMinimumPlain: pc.minimum,
+      pcRecommendedPlain: pc.recommended,
+      description,
+    }
+  }
+
   const base = steamApiBase()
   const url = `${base}/appdetails?appids=${encodeURIComponent(appId)}&l=turkish&cc=tr`
   const r = await fetch(url)
@@ -103,6 +152,35 @@ export type SteamFeaturedData = {
 type ScreenshotEntry = { path_thumbnail?: string; path_full?: string }
 
 export async function fetchSteamFeaturedData(appId: string): Promise<SteamFeaturedData | null> {
+  if (DEMO_SNAPSHOT_MODE) {
+    const snap = await getDemoSnapshot()
+    const d = snap.steamAppDetails?.[String(appId)]
+    if (!d || typeof d !== 'object') return null
+    const rawShots = Array.isArray(d.screenshots) ? (d.screenshots as ScreenshotEntry[]) : []
+    const shots = rawShots
+      .map((s) => String(s.path_thumbnail || s.path_full || '').trim())
+      .filter(Boolean)
+      .slice(0, 4)
+    const header = d.header_image != null ? String(d.header_image) : null
+    const padded: string[] = [...shots]
+    while (padded.length < 4) {
+      if (header) padded.push(header)
+      else break
+    }
+    const genresRaw = Array.isArray(d.genres) ? (d.genres as { description?: string }[]) : []
+    const genres = genresRaw.map((g) => String(g.description || '').trim()).filter(Boolean)
+    const rel = d.release_date as { coming_soon?: boolean } | undefined
+    const released = rel?.coming_soon !== true
+    return {
+      name: String(d.name || 'Oyun'),
+      headerImage: header,
+      screenshots: padded.slice(0, 4),
+      priceOverview: (d.price_overview as SteamPriceOverview | undefined) ?? null,
+      genres,
+      released,
+    }
+  }
+
   const base = steamApiBase()
   const url = `${base}/appdetails?appids=${encodeURIComponent(appId)}&l=turkish&cc=tr`
   const r = await fetch(url)
