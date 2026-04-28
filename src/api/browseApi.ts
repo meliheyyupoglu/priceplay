@@ -1,4 +1,3 @@
-import { API_BASE } from '../config'
 import type { BrowseCategory } from '../lib/browseCategories'
 import { FALLBACK_BROWSE_CATEGORIES } from '../lib/browseCategories'
 
@@ -16,17 +15,9 @@ function isValidList(data: unknown): data is BrowseCategory[] {
   })
 }
 
-/** Sunucu `GET /api/browse/categories`; hata veya bos listede yerel fallback. */
+/** Sunucusuz mod: kategori listesi doğrudan yerel fallback. */
 export async function fetchBrowseCategories(): Promise<BrowseCategory[]> {
-  try {
-    const r = await fetch(`${API_BASE}/browse/categories`, {
-      headers: { Accept: 'application/json' },
-    })
-    if (!r.ok) return FALLBACK_BROWSE_CATEGORIES
-    const data: unknown = await r.json()
-    if (isValidList(data)) return data
-  } catch {
-    /* ag yok / CORS */
-  }
+  const data: unknown = FALLBACK_BROWSE_CATEGORIES
+  if (isValidList(data)) return data
   return FALLBACK_BROWSE_CATEGORIES
 }

@@ -4,9 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "start": "npm --prefix server start",
-    "start:server": "npm --prefix server start",
-    "dev:server": "npm --prefix server run dev",
+    "start": "vite",
+    "snapshot:demo": "node scripts/generate-demo-snapshot.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",

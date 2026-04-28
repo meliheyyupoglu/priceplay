@@ -1,8 +1,38 @@
-import { API_BASE } from '../config'
 import type { User } from '../types'
 
-function jsonHeaders(): HeadersInit {
-  return { 'Content-Type': 'application/json', Accept: 'application/json' }
+const USERS_KEY = 'pp_local_users_v1'
+const SESSION_KEY = 'pp_local_session_v1'
+
+type LocalUser = User & { password: string; updatedAt?: string | null }
+
+function readUsers(): LocalUser[] {
+  try {
+    const raw = localStorage.getItem(USERS_KEY)
+    const data = raw ? (JSON.parse(raw) as unknown) : []
+    return Array.isArray(data) ? (data as LocalUser[]) : []
+  } catch {
+    return []
+  }
+}
+
+function writeUsers(users: LocalUser[]) {
+  localStorage.setItem(USERS_KEY, JSON.stringify(users))
+}
+
+function saveSession(userId: string) {
+  localStorage.setItem(SESSION_KEY, userId)
+}
+
+function makeUserId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `u_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function toPublicUser(user: LocalUser): User {
+  const { password: _password, ...rest } = user
+  return rest
 }
 
 export async function register(body: {
@@ -13,46 +43,66 @@ export async function register(body: {
   phone: string
   password: string
 }): Promise<User> {
-  const r = await fetch(`${API_BASE}/auth/register`, {
-    method: 'POST',
-    headers: jsonHeaders(),
-    body: JSON.stringify(body),
-  })
-  const data = (await r.json().catch(() => ({}))) as Record<string, unknown>
-  if (r.status !== 201) throw new Error(String(data.error ?? 'Kayıt başarısız'))
-  return data as unknown as User
+  const users = readUsers()
+  const email = String(body.email || '').trim().toLowerCase()
+  const nickname = String(body.nickname || '').trim().toLowerCase()
+  const phone = String(body.phone || '').replace(/\D/g, '')
+  if (users.some((u) => u.email.toLowerCase() === email)) throw new Error('Email already used')
+  if (users.some((u) => (u.nickname || '').toLowerCase() === nickname)) throw new Error('Nickname already used')
+  if (users.some((u) => (u.phone || '').replace(/\D/g, '') === phone)) throw new Error('Phone already used')
+  const next: LocalUser = {
+    id: makeUserId(),
+    firstName: String(body.firstName || '').trim(),
+    lastName: String(body.lastName || '').trim(),
+    nickname,
+    email,
+    phone,
+    createdAt: new Date().toISOString(),
+    password: String(body.password || ''),
+  }
+  users.push(next)
+  writeUsers(users)
+  saveSession(next.id)
+  return toPublicUser(next)
 }
 
 export async function login(identifier: string, password: string): Promise<User> {
-  const r = await fetch(`${API_BASE}/auth/login`, {
-    method: 'POST',
-    headers: jsonHeaders(),
-    body: JSON.stringify({ identifier: identifier.trim(), password }),
-  })
-  const data = (await r.json().catch(() => ({}))) as Record<string, unknown>
-  if (r.status !== 200) throw new Error(String(data.error ?? 'Giriş başarısız'))
-  return data as unknown as User
+  const idn = String(identifier || '').trim().toLowerCase()
+  const user = readUsers().find((u) => u.email.toLowerCase() === idn || (u.nickname || '').toLowerCase() === idn)
+  if (!user || user.password !== String(password || '')) throw new Error('Invalid credentials')
+  saveSession(user.id)
+  return toPublicUser(user)
 }
 
 export async function fetchMe(userId: string): Promise<User> {
-  const r = await fetch(`${API_BASE}/auth/me`, {
-    headers: { Accept: 'application/json', 'x-user-id': userId },
-  })
-  const data = (await r.json().catch(() => ({}))) as Record<string, unknown>
-  if (r.status !== 200) throw new Error(String(data.error ?? 'Profil alınamadı'))
-  return data as unknown as User
+  const user = readUsers().find((u) => u.id === userId)
+  if (!user) throw new Error('User not found')
+  return toPublicUser(user)
 }
 
 export async function updateProfile(
   userId: string,
   body: { firstName: string; lastName: string; nickname: string; phone: string },
 ): Promise<User> {
-  const r = await fetch(`${API_BASE}/auth/profile`, {
-    method: 'PUT',
-    headers: { ...jsonHeaders(), 'x-user-id': userId },
-    body: JSON.stringify(body),
-  })
-  const data = (await r.json().catch(() => ({}))) as Record<string, unknown>
-  if (r.status !== 200) throw new Error(String(data.error ?? 'Güncellenemedi'))
-  return data as unknown as User
+  const users = readUsers()
+  const idx = users.findIndex((u) => u.id === userId)
+  if (idx < 0) throw new Error('User not found')
+  const nickname = String(body.nickname || '').trim().toLowerCase()
+  const phone = String(body.phone || '').replace(/\D/g, '')
+  if (users.some((u, i) => i !== idx && (u.nickname || '').toLowerCase() === nickname)) {
+    throw new Error('Nickname already used')
+  }
+  if (users.some((u, i) => i !== idx && (u.phone || '').replace(/\D/g, '') === phone)) {
+    throw new Error('Phone already used')
+  }
+  users[idx] = {
+    ...users[idx],
+    firstName: String(body.firstName || '').trim(),
+    lastName: String(body.lastName || '').trim(),
+    nickname,
+    phone,
+    updatedAt: new Date().toISOString(),
+  }
+  writeUsers(users)
+  return toPublicUser(users[idx])
 }

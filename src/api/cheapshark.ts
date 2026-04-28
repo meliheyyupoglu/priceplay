@@ -11,6 +11,49 @@ const headers = {
   'User-Agent': 'PricePlayWeb/1.0',
 }
 
+type DemoSnapshot = {
+  generatedAt: string
+  stores?: unknown[]
+  popular?: unknown[]
+  discounted?: unknown[]
+  newReleases?: unknown[]
+  free100?: unknown[]
+  searches?: Record<string, unknown[]>
+  gameDetails?: Record<string, Record<string, unknown>>
+}
+
+const DEMO_SNAPSHOT_MODE = String(import.meta.env.VITE_DEMO_SNAPSHOT_MODE ?? '1').trim() === '1'
+let demoSnapshotCache: DemoSnapshot | null = null
+
+async function getDemoSnapshot(): Promise<DemoSnapshot> {
+  if (!DEMO_SNAPSHOT_MODE) throw new Error('DEMO snapshot mode disabled')
+  if (demoSnapshotCache) return demoSnapshotCache
+  const r = await fetch('/demo-snapshot.json', {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  })
+  if (!r.ok) throw new Error(`Demo snapshot yuklenemedi: ${r.status}`)
+  const data = (await r.json()) as DemoSnapshot
+  demoSnapshotCache = data
+  return data
+}
+
+function parseGamesFromUnknownArray(list: unknown[] | undefined): Game[] {
+  if (!Array.isArray(list)) return []
+  const out: Game[] = []
+  const seen = new Set<string>()
+  for (const raw of list) {
+    if (!raw || typeof raw !== 'object') continue
+    const g = parseGame(raw as Record<string, unknown>)
+    if (!g) continue
+    const k = g.gameId || g.title
+    if (!k || seen.has(k)) continue
+    seen.add(k)
+    out.push(g)
+  }
+  return out
+}
+
 async function fetchJsonOrFallback<T>(url: string, fallback: T): Promise<T> {
   try {
     const r = await fetch(url, { headers })
@@ -189,7 +232,9 @@ export async function fetchStoreNames(): Promise<Record<string, string>> {
   const now = Date.now()
   if (storeNameCache && now - storeNameFetched < STORE_TTL_MS) return storeNameCache
 
-  const list = await fetchJsonOrFallback<unknown[]>(`${CHEAPSHARK_BASE}/stores`, [])
+  const list = DEMO_SNAPSHOT_MODE
+    ? ((await getDemoSnapshot()).stores ?? [])
+    : await fetchJsonOrFallback<unknown[]>(`${CHEAPSHARK_BASE}/stores`, [])
   const map: Record<string, string> = {}
   for (const e of list) {
     if (!e || typeof e !== 'object') continue
@@ -216,6 +261,11 @@ function uniqueDealsToGames(data: unknown[], seen: Set<string>, out: Game[]) {
 }
 
 export async function fetchPopularGames(pageCount = 4): Promise<Game[]> {
+  if (DEMO_SNAPSHOT_MODE) {
+    const snap = await getDemoSnapshot()
+    const list = parseGamesFromUnknownArray(snap.popular)
+    return list.slice(0, Math.max(1, pageCount) * 60)
+  }
   const seen = new Set<string>()
   const out: Game[] = []
   for (let page = 0; page < pageCount; page++) {
@@ -228,6 +278,11 @@ export async function fetchPopularGames(pageCount = 4): Promise<Game[]> {
 }
 
 export async function fetchDiscountedGames(pageCount = 4): Promise<Game[]> {
+  if (DEMO_SNAPSHOT_MODE) {
+    const snap = await getDemoSnapshot()
+    const list = parseGamesFromUnknownArray(snap.discounted)
+    return list.slice(0, Math.max(1, pageCount) * 60)
+  }
   const seen = new Set<string>()
   const out: Game[] = []
   for (let page = 0; page < pageCount; page++) {
@@ -246,6 +301,12 @@ export async function fetchDiscountedGames(pageCount = 4): Promise<Game[]> {
  * Tarihi bilinmeyenleri en sona koyup listeyi doldurur, böylece vitrin boş kalmaz.
  */
 export async function fetchNewReleaseDeals(maxGames = 20, pageCount = 16): Promise<Game[]> {
+  if (DEMO_SNAPSHOT_MODE) {
+    const snap = await getDemoSnapshot()
+    const list = parseGamesFromUnknownArray(snap.newReleases)
+    const cap = Math.max(maxGames, pageCount * 60)
+    return list.slice(0, cap)
+  }
   const poolSeen = new Set<string>()
   const pool: Game[] = []
   const sortBy = encodeURIComponent('Release')
@@ -280,6 +341,12 @@ export async function fetchNewReleaseDeals(maxGames = 20, pageCount = 16): Promi
 }
 
 export async function fetchHundredPercentFreeDeals(maxGames = 20, maxPages = 10): Promise<Game[]> {
+  if (DEMO_SNAPSHOT_MODE) {
+    const snap = await getDemoSnapshot()
+    const list = parseGamesFromUnknownArray(snap.free100)
+    const cap = Math.max(maxGames, maxPages * 60)
+    return list.slice(0, cap)
+  }
   const seen = new Set<string>()
   const out: Game[] = []
   for (let page = 0; page < maxPages && out.length < maxGames; page++) {
@@ -307,6 +374,27 @@ export async function fetchHundredPercentFreeDeals(maxGames = 20, maxPages = 10)
 }
 
 export async function searchGames(title: string, limit = 20): Promise<Game[]> {
+  if (DEMO_SNAPSHOT_MODE) {
+    const snap = await getDemoSnapshot()
+    const q = title.trim().toLowerCase()
+    const exact = parseGamesFromUnknownArray(snap.searches?.[q])
+    if (exact.length > 0) return exact.slice(0, limit)
+    const pool = [
+      ...parseGamesFromUnknownArray(snap.popular),
+      ...parseGamesFromUnknownArray(snap.discounted),
+      ...parseGamesFromUnknownArray(snap.newReleases),
+      ...parseGamesFromUnknownArray(snap.free100),
+    ]
+    const uniq = new Map<string, Game>()
+    for (const g of pool) {
+      const k = g.gameId || g.title
+      if (!k || uniq.has(k)) continue
+      uniq.set(k, g)
+    }
+    return [...uniq.values()]
+      .filter((g) => g.title.toLowerCase().includes(q))
+      .slice(0, limit)
+  }
   const q = encodeURIComponent(title.trim())
   const url = `${CHEAPSHARK_BASE}/games?title=${q}&limit=${limit}`
   const data = await fetchJsonOrFallback<unknown[]>(url, [])
@@ -320,6 +408,16 @@ export async function searchGames(title: string, limit = 20): Promise<Game[]> {
 }
 
 export async function fetchGameJson(gameId: string): Promise<Record<string, unknown>> {
+  if (DEMO_SNAPSHOT_MODE) {
+    const snap = await getDemoSnapshot()
+    const hit = snap.gameDetails?.[String(gameId)]
+    if (hit && typeof hit === 'object') return hit
+    const fallbackTitle = String(gameId || 'Unknown Game').trim() || 'Unknown Game'
+    return {
+      info: { title: fallbackTitle, steamAppID: null, thumb: null },
+      deals: [],
+    } as Record<string, unknown>
+  }
   const url = `${CHEAPSHARK_BASE}/games?id=${encodeURIComponent(gameId)}`
   const r = await fetch(url, { headers })
   if (!r.ok) {

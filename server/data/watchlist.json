@@ -1,0 +1,82 @@
+{
+  "watchlist": [
+    {
+      "id": "f90af4ed-2c4e-442c-b7d0-b84c5cb6a3f9",
+      "userId": "455d0a07-3419-4292-9524-79a8ecef6c44",
+      "gameId": "254429",
+      "gameTitle": "The Last of Us Part I",
+      "targetPrice": null,
+      "lastPrice": 34.99,
+      "lastNotifiedPrice": null,
+      "lastNotifiedAt": null,
+      "isActive": true,
+      "updatedAt": "2026-04-27T19:40:00.867Z",
+      "createdAt": "2026-04-24T13:40:12.823Z"
+    },
+    {
+      "id": "977ab4bb-d5c1-47e2-addc-a462e714a5d8",
+      "userId": "455d0a07-3419-4292-9524-79a8ecef6c44",
+      "gameId": "263462",
+      "gameTitle": "Doomblade",
+      "targetPrice": null,
+      "lastPrice": 0,
+      "lastNotifiedPrice": null,
+      "lastNotifiedAt": null,
+      "isActive": true,
+      "updatedAt": "2026-04-27T19:40:02.696Z",
+      "createdAt": "2026-04-24T13:45:14.805Z"
+    },
+    {
+      "id": "84519ef7-9473-4335-aad3-b390821f2815",
+      "userId": "7e9cdca9-d159-4eef-8782-7fead0ba2d82",
+      "gameId": "320213",
+      "gameTitle": "Sintopia",
+      "targetPrice": null,
+      "lastPrice": 22.24,
+      "lastNotifiedPrice": null,
+      "lastNotifiedAt": null,
+      "isActive": true,
+      "updatedAt": "2026-04-27T19:40:02.696Z",
+      "createdAt": "2026-04-24T14:08:06.384Z"
+    },
+    {
+      "id": "ef459a37-1662-4cdc-b91f-2eea31d39545",
+      "userId": "7e9cdca9-d159-4eef-8782-7fead0ba2d82",
+      "gameId": "2277",
+      "gameTitle": "3 Stars of Destiny",
+      "targetPrice": null,
+      "lastPrice": 0.59,
+      "lastNotifiedPrice": null,
+      "lastNotifiedAt": null,
+      "isActive": true,
+      "updatedAt": "2026-04-27T19:40:02.899Z",
+      "createdAt": "2026-04-24T14:08:26.086Z"
+    },
+    {
+      "id": "1c815289-169b-42ab-beba-a02acd4bd366",
+      "userId": "7e9cdca9-d159-4eef-8782-7fead0ba2d82",
+      "gameId": "106360",
+      "gameTitle": "The Book of Legends",
+      "targetPrice": null,
+      "lastPrice": 0.59,
+      "lastNotifiedPrice": null,
+      "lastNotifiedAt": null,
+      "isActive": true,
+      "updatedAt": "2026-04-27T19:40:03.610Z",
+      "createdAt": "2026-04-24T14:10:46.522Z"
+    },
+    {
+      "id": "de304842-8c57-4d98-b634-a48667f62034",
+      "userId": "7e9cdca9-d159-4eef-8782-7fead0ba2d82",
+      "gameId": "93463",
+      "gameTitle": "Edna and Harvey: Harvey's New Eyes",
+      "targetPrice": null,
+      "lastPrice": 1.76,
+      "lastNotifiedPrice": null,
+      "lastNotifiedAt": null,
+      "isActive": true,
+      "updatedAt": "2026-04-27T19:40:03.814Z",
+      "createdAt": "2026-04-24T15:19:00.902Z"
+    }
+  ]
+}

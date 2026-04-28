@@ -1,0 +1,35 @@
+{
+  "users": [
+    {
+      "id": "455d0a07-3419-4292-9524-79a8ecef6c44",
+      "firstName": "aaa",
+      "lastName": "bbbb",
+      "nickname": "aaaaab",
+      "email": "aaaaa@gmail.com",
+      "phone": "05555555555",
+      "passwordHash": "$2a$10$dOtIW73kN3i.cxU0jDTYaeAAMeZj3iN4uypgbsQEiQxlh710kfOVq",
+      "createdAt": "2026-04-24T12:46:54.235Z",
+      "updatedAt": "2026-04-24T13:53:28.286Z"
+    },
+    {
+      "id": "348826dc-4196-4d9e-a67c-a5c03bcbbc5d",
+      "firstName": "qqq",
+      "lastName": "aaa",
+      "nickname": "aaaaas",
+      "email": "asddff@gmail.com",
+      "phone": "05455434543",
+      "passwordHash": "$2a$10$d0gMtg.XCKamYGWWU9h2wOI/x4md8NYRjrK4.FTymHmqDTbShrOHW",
+      "createdAt": "2026-04-24T13:55:06.549Z"
+    },
+    {
+      "id": "7e9cdca9-d159-4eef-8782-7fead0ba2d82",
+      "firstName": "yusuf",
+      "lastName": "reyhan",
+      "nickname": "dertlibal",
+      "email": "yusufreyhan19.58@gmail.com",
+      "phone": "05306723916",
+      "passwordHash": "$2a$10$4Ioub1VPNCCLZiW4kUPWM.ZFb.Drv.YSWNfqDzbuVtbtVQdoDHuYi",
+      "createdAt": "2026-04-24T14:00:32.183Z"
+    }
+  ]
+}

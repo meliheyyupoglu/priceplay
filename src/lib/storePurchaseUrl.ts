@@ -1,15 +1,14 @@
-import { apiBaseAbsolute } from '../config'
 import type { PriceRow } from '../types'
 
 export function steamStoreAppUrl(steamAppId: string): string {
   return `https://store.steampowered.com/app/${encodeURIComponent(steamAppId)}/`
 }
 
-/** Sunucu CheapShark yönlendirmesini takip edip 302 ile mağaza sitesine iletir (tarayıcı adresi CheapShark olmaz). */
+/** Sunucusuz mod: doğrudan CheapShark redirect adresine gider. */
 export function storeDealResolveUrl(dealId: string): string | null {
   const id = dealId?.trim()
   if (!id || !/^\d+$/.test(id)) return null
-  return `${apiBaseAbsolute()}/cheapshark/resolve-deal?dealID=${encodeURIComponent(id)}`
+  return `https://www.cheapshark.com/redirect?dealID=${encodeURIComponent(id)}`
 }
 
 export function storePurchaseUrl(row: PriceRow, steamAppId: string | null | undefined): string | null {
