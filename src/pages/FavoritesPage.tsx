@@ -21,7 +21,6 @@ export function FavoritesPage() {
     <>
       <PageBack />
       <h1 className="section-title">Favoriler</h1>
-      <p className="muted">Bu cihazda saklanır; giriş yaptığın hesapla eşlenir.</p>
       {games.length === 0 ? (
         <p className="muted empty-state" style={{ marginTop: 24 }}>
           Henüz favori yok. <Link to="/browse/popular">Popüler oyunlara göz at</Link> veya kartlardaki yıldıza tıkla.

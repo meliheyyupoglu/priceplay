@@ -46,7 +46,7 @@ export function GameCard({ game, onFavoriteChange, size = 'md' }: Props) {
             <div className="game-card-price-row">
               {discountPct != null && <span className="game-card-discount">-{discountPct}%</span>}
               <span className="price-tag">{priceLabel}</span>
-              <span className="game-card-price-note">En ucuz teklif (USD)</span>
+              <span className="game-card-price-note">En ucuz teklif</span>
             </div>
           )}
         </div>

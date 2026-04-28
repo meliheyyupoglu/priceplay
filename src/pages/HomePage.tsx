@@ -25,7 +25,7 @@ const HOME_PREVIEW = 10
 const FETCH_PAGES = 4
 const HOME_FREE_GRID = 10
 const HOME_100_CAROUSEL = 25
-const HOME_NEW_RELEASES = 14
+const HOME_NEW_RELEASES = 20
 
 function buildThumbsByCategory(categories: BrowseCategory[], games: Game[]): Record<string, string[]> {
   const out: Record<string, string[]> = {}
@@ -123,7 +123,7 @@ export function HomePage() {
         try {
           await new Promise((r) => setTimeout(r, 200))
           if (cancelled) return
-          const nrRaw = await fetchNewReleaseDeals(HOME_NEW_RELEASES + 10, 14)
+          const nrRaw = await fetchNewReleaseDeals(HOME_NEW_RELEASES, 16)
           if (cancelled) return
           setNewReleases(uniqueByGameKey(nrRaw).slice(0, HOME_NEW_RELEASES))
         } catch {

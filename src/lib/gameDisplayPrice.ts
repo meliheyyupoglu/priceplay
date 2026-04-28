@@ -37,7 +37,7 @@ export type HeroPriceView =
 
 /**
  * Carousel / vitrin: CheapShark en ucuz teklifi varsa onu öne al (Steam görselleri ayrı kalır).
- * Para birimi karışımı (TR vs USD) olmadan tek satır: önce USD teklif, yoksa Steam formatı.
+ * Para birimi karışımı olmadan tek satır: önce CheapShark teklif, yoksa Steam formatı.
  */
 export function pickHeroPriceView(game: Game, priceOverview: SteamPriceOverview | null): HeroPriceView {
   const cs = formatCheapestUsd(game.cheapest)
@@ -46,7 +46,7 @@ export function pickHeroPriceView(game: Game, priceOverview: SteamPriceOverview 
       source: 'cheapshark',
       priceLabel: cs,
       discountPct: parseSavingsPercent(game.savings),
-      note: 'En ucuz teklif (USD)',
+      note: 'En ucuz teklif',
     }
   }
   const po = priceOverview

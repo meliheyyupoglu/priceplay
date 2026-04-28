@@ -234,11 +234,9 @@ export async function fetchDiscountedGames(pageCount = 4): Promise<Game[]> {
 
 /** Eskiden ücretli, şu an ~ücretsiz (%100’e yakın indirim, liste fiyatı > 0). */
 
-const NEW_RELEASE_MIN_YEAR = 2026
-
 /**
- * CheapShark `sortBy=Release` ile sayfalar; yalnızca çıkış yılı ≥ 2026 ve tarihi bilinen oyunlar.
- * Sıra: Metacritic yüksek → düşük (indirim oranı kullanılmaz). 429 için sayfa sayısını makul tut.
+ * CheapShark `sortBy=Release` ile sayfalar; çıkış tarihi bilinenleri en yeni tarihe göre sıralar.
+ * Tarihi bilinmeyenleri en sona koyup listeyi doldurur, böylece vitrin boş kalmaz.
  */
 export async function fetchNewReleaseDeals(maxGames = 20, pageCount = 16): Promise<Game[]> {
   const poolSeen = new Set<string>()
@@ -249,35 +247,30 @@ export async function fetchNewReleaseDeals(maxGames = 20, pageCount = 16): Promi
     const r = await fetch(url, { headers })
     if (!r.ok) throw new Error(`Yeni çıkanlar: ${r.status}`)
     const data = (await r.json()) as unknown[]
-    let pageMaxYear = -9999
-    let pageHadAnyYear = false
     for (const raw of data) {
       if (!raw || typeof raw !== 'object') continue
       const g = parseGame(raw as Record<string, unknown>)
       if (!g) continue
-      const y = releaseYearFromGame(g)
-      if (y != null) {
-        pageHadAnyYear = true
-        pageMaxYear = Math.max(pageMaxYear, y)
-      }
-      if (y == null || y < NEW_RELEASE_MIN_YEAR) continue
       const k = g.gameId || g.title
       if (!k || poolSeen.has(k)) continue
       poolSeen.add(k)
       pool.push(g)
     }
-    if (data.length > 0 && pageHadAnyYear && pageMaxYear < NEW_RELEASE_MIN_YEAR) break
     if (pool.length >= Math.max(maxGames * 4, 72)) break
     if (page < pageCount - 1) await new Promise((res) => setTimeout(res, 130))
   }
   if (pool.length === 0) return []
-  const enrichCap = Math.min(pool.length, 96)
-  const enriched = await enrichGamesInBatches(pool.slice(0, enrichCap), 3)
-  enriched.sort((a, b) => {
-    const d = metacriticNum(b) - metacriticNum(a)
-    if (d !== 0) return d
-    return a.title.localeCompare(b.title)
-  })
+  const withDate = pool
+    .filter((g) => releaseYearFromGame(g) != null)
+    .sort((a, b) => {
+      const ta = parseInt(String(a.releaseDate ?? '0'), 10)
+      const tb = parseInt(String(b.releaseDate ?? '0'), 10)
+      return tb - ta
+    })
+  const withoutDate = pool.filter((g) => releaseYearFromGame(g) == null)
+  const ordered = [...withDate, ...withoutDate]
+  const enrichCap = Math.min(ordered.length, 96)
+  const enriched = await enrichGamesInBatches(ordered.slice(0, enrichCap), 3)
   return enriched.slice(0, maxGames)
 }
 

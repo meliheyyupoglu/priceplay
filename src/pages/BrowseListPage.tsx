@@ -46,9 +46,9 @@ export function BrowseListPage() {
     k === 'free-popular'
       ? 'Sürekli ücretsiz (F2P) bilinen başlıklar; Metacritic’e göre yüksekten düşüğe. Geçici %100 indirimli ücretsiz teklifler bu listede yok.'
       : k === 'free-100'
-        ? 'Listede fiyatı olan ve şu an ücretsiz veya fiyatı sıfıra yakın indirimli teklifler (USD).'
+        ? 'Listede fiyatı olan ve şu an ücretsiz veya fiyatı sıfıra yakın indirimli teklifler.'
         : k === 'new-releases'
-          ? 'Yalnızca çıkış yılı 2026 ve sonrası; sıra Metacritic (yüksek önce). İndirim oranı sıralamada kullanılmaz.'
+          ? 'Çıkış tarihi bilinen oyunlar arasından en yeni tarihe göre sıralanır.'
           : null
 
   useEffect(() => {
