@@ -14,22 +14,6 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/steam-store/, ''),
       },
-      // CheapShark /redirect: tarayıcı adres çubuğunda cheapshark.com görünmesin diye
-      // aynı origin üzerinden iletilir; hedef mağaza 302'si istemciye iletilir.
-      '/cheapshark-redirect': {
-        target: 'https://www.cheapshark.com',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/cheapshark-redirect/, '/redirect'),
-      },
-    },
-  },
-  preview: {
-    proxy: {
-      '/cheapshark-redirect': {
-        target: 'https://www.cheapshark.com',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/cheapshark-redirect/, '/redirect'),
-      },
     },
   },
 })
