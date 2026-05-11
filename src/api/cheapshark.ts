@@ -117,7 +117,13 @@ function buildFallbackGamePayloadFromSnapshot(
   gameId: string,
   snap: DemoSnapshot,
 ): Record<string, unknown> | null {
-  const pools = [snap.popular ?? [], snap.discounted ?? [], snap.newReleases ?? [], snap.free100 ?? []]
+  const pools = [
+    snap.curatedPopular ?? [],
+    snap.popular ?? [],
+    snap.discounted ?? [],
+    snap.newReleases ?? [],
+    snap.free100 ?? [],
+  ]
   const matchedDeals: Record<string, unknown>[] = []
   let title = gameId
   let thumb: string | null = null
@@ -154,6 +160,41 @@ function buildFallbackGamePayloadFromSnapshot(
     },
     deals: matchedDeals,
   } as Record<string, unknown>
+}
+
+/** Mobil AppState._hasPrice ile ayni mantik: liste fiyati veya gameDetails / deal havuzundan cozulebilir teklif. */
+function snapshotGameHasListablePrice(game: Game, snap: DemoSnapshot): boolean {
+  const cheapest = parseFloat(String(game.cheapest ?? '').replace(',', '.'))
+  if (Number.isFinite(cheapest) && cheapest >= 0) return true
+
+  const gid = String(game.gameId ?? '').trim()
+  if (gid) {
+    const detail = snap.gameDetails?.[gid] as Record<string, unknown> | undefined
+    const deals = detail?.deals as unknown[] | undefined
+    if (Array.isArray(deals) && deals.length > 0) return true
+    const fb = buildFallbackGamePayloadFromSnapshot(gid, snap)
+    const fbDeals = fb?.deals as unknown[] | undefined
+    if (Array.isArray(fbDeals) && fbDeals.length > 0) return true
+  }
+
+  const t0 = game.title.trim().toLowerCase()
+  if (t0 && t0 !== 'bilinmeyen oyun') {
+    for (const p of Object.values(snap.gameDetails ?? {})) {
+      if (!p || typeof p !== 'object') continue
+      const info = (p as Record<string, unknown>).info as Record<string, unknown> | undefined
+      const t = String(info?.title ?? '').trim().toLowerCase()
+      if (!t) continue
+      if (t !== t0 && !t.includes(t0) && !t0.includes(t)) continue
+      const deals = (p as Record<string, unknown>).deals as unknown[] | undefined
+      if (Array.isArray(deals) && deals.length > 0) return true
+    }
+  }
+
+  return false
+}
+
+function filterSnapshotGamesWithPrices(games: Game[], snap: DemoSnapshot): Game[] {
+  return games.filter((g) => snapshotGameHasListablePrice(g, snap))
 }
 
 async function fetchJsonOrFallback<T>(url: string, fallback: T): Promise<T> {
@@ -365,9 +406,9 @@ function uniqueDealsToGames(data: unknown[], seen: Set<string>, out: Game[]) {
 export async function fetchPopularGames(pageCount = 4): Promise<Game[]> {
   if (DEMO_SNAPSHOT_MODE) {
     const snap = await getDemoSnapshot()
-    const curated = parseGamesFromUnknownArray(snap.curatedPopular)
+    const curated = filterSnapshotGamesWithPrices(parseGamesFromUnknownArray(snap.curatedPopular), snap)
     if (curated.length > 0) return curated
-    const list = parseGamesFromUnknownArray(snap.popular)
+    const list = filterSnapshotGamesWithPrices(parseGamesFromUnknownArray(snap.popular), snap)
     return list.slice(0, Math.max(1, pageCount) * 60)
   }
   const seen = new Set<string>()
@@ -384,7 +425,7 @@ export async function fetchPopularGames(pageCount = 4): Promise<Game[]> {
 export async function fetchDiscountedGames(pageCount = 4): Promise<Game[]> {
   if (DEMO_SNAPSHOT_MODE) {
     const snap = await getDemoSnapshot()
-    const list = parseGamesFromUnknownArray(snap.discounted)
+    const list = filterSnapshotGamesWithPrices(parseGamesFromUnknownArray(snap.discounted), snap)
     return list.slice(0, Math.max(1, pageCount) * 60)
   }
   const seen = new Set<string>()
@@ -407,7 +448,7 @@ export async function fetchDiscountedGames(pageCount = 4): Promise<Game[]> {
 export async function fetchNewReleaseDeals(maxGames = 20, pageCount = 16): Promise<Game[]> {
   if (DEMO_SNAPSHOT_MODE) {
     const snap = await getDemoSnapshot()
-    const list = parseGamesFromUnknownArray(snap.newReleases)
+    const list = filterSnapshotGamesWithPrices(parseGamesFromUnknownArray(snap.newReleases), snap)
     const cap = Math.max(maxGames, pageCount * 60)
     return list.slice(0, cap)
   }
@@ -447,7 +488,7 @@ export async function fetchNewReleaseDeals(maxGames = 20, pageCount = 16): Promi
 export async function fetchHundredPercentFreeDeals(maxGames = 20, maxPages = 10): Promise<Game[]> {
   if (DEMO_SNAPSHOT_MODE) {
     const snap = await getDemoSnapshot()
-    const list = parseGamesFromUnknownArray(snap.free100)
+    const list = filterSnapshotGamesWithPrices(parseGamesFromUnknownArray(snap.free100), snap)
     const cap = Math.max(maxGames, maxPages * 60)
     return list.slice(0, cap)
   }
@@ -491,6 +532,7 @@ export async function fetchAllKnownGames(maxGames = 2000): Promise<Game[]> {
     for (const g of merged) {
       const k = g.gameId || g.title
       if (!k || uniq.has(k)) continue
+      if (!snapshotGameHasListablePrice(g, snap)) continue
       uniq.set(k, g)
     }
     return [...uniq.values()].slice(0, maxGames)
@@ -530,7 +572,7 @@ export async function searchGames(title: string, limit = 20): Promise<Game[]> {
   if (DEMO_SNAPSHOT_MODE) {
     const snap = await getDemoSnapshot()
     const q = title.trim().toLowerCase()
-    const exact = parseGamesFromUnknownArray(snap.searches?.[q])
+    const exact = filterSnapshotGamesWithPrices(parseGamesFromUnknownArray(snap.searches?.[q]), snap)
     if (exact.length > 0) return exact.slice(0, limit)
     const pool = [
       ...parseGamesFromUnknownArray(snap.curatedPopular),
@@ -543,6 +585,7 @@ export async function searchGames(title: string, limit = 20): Promise<Game[]> {
     for (const g of pool) {
       const k = g.gameId || g.title
       if (!k || uniq.has(k)) continue
+      if (!snapshotGameHasListablePrice(g, snap)) continue
       uniq.set(k, g)
     }
     // Curated/gameDetails içindeki ama listelerde görünmeyen başlıkları da aramaya ekle.
@@ -552,7 +595,7 @@ export async function searchGames(title: string, limit = 20): Promise<Game[]> {
       if (!t) continue
       const k = String(gameId || t).trim()
       if (!k || uniq.has(k)) continue
-      uniq.set(k, {
+      const g: Game = {
         gameId: String(gameId),
         title: t,
         steamAppId:
@@ -560,7 +603,9 @@ export async function searchGames(title: string, limit = 20): Promise<Game[]> {
             ? String(info.steamAppID).trim()
             : null,
         thumb: info?.thumb != null ? String(info.thumb) : null,
-      })
+      }
+      if (!snapshotGameHasListablePrice(g, snap)) continue
+      uniq.set(k, g)
     }
     return [...uniq.values()]
       .filter((g) => g.title.toLowerCase().includes(q))
