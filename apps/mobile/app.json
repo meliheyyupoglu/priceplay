@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "PricePlay Mobile",
+    "slug": "priceplay-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#111111"
+    },
+    "assetBundlePatterns": ["**/*"]
+  }
+}

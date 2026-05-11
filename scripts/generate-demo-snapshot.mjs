@@ -8,13 +8,17 @@ const PAGE_SIZE = Number(process.env.DEMO_PAGE_SIZE || 60)
 const PAGES_PER_RUN = Number(process.env.DEMO_PAGES_PER_RUN || 3)
 const DETAILS_PER_RUN = Number(process.env.DEMO_DETAILS_PER_RUN || 60)
 const STEAM_DETAILS_PER_RUN = Number(process.env.DEMO_STEAM_DETAILS_PER_RUN || 80)
+// CheapShark'ın çözemediği başlıkları doğrudan Steam store search ile appId'e çevirip:
+// steamAppDetails + gameDetails + curatedPopular backfill etmek için.
+const STEAM_TITLE_RESOLVE_PER_RUN = Number(process.env.DEMO_STEAM_TITLE_RESOLVE_PER_RUN || 30)
 const CURATED_PER_RUN = Number(process.env.DEMO_CURATED_PER_RUN || 20)
 const SKIP_SEARCH = String(process.env.DEMO_SKIP_SEARCH || '0').trim() === '1'
 const ONLY_BACKFILL_EXISTING = String(process.env.DEMO_ONLY_BACKFILL_EXISTING || '0').trim() === '1'
+const ONLY_MISSING_PRICES = String(process.env.DEMO_ONLY_MISSING_PRICES || '0').trim() === '1'
+const MISSING_PRICE_PER_RUN = Number(process.env.DEMO_MISSING_PRICE_PER_RUN || 30)
 
 const CURATED_POPULAR_TITLES = [
   'Counter-Strike 2',
-  'Valorant',
   'Apex Legends',
   'PUBG: BATTLEGROUNDS',
   "Tom Clancy's Rainbow Six Siege",
@@ -196,6 +200,11 @@ function uniqueGameIdsFromDeals(...lists) {
   return out
 }
 
+function hasDeals(payload) {
+  const deals = payload?.deals
+  return Array.isArray(deals) && deals.length > 0
+}
+
 function normText(s) {
   return String(s || '')
     .toLowerCase()
@@ -254,6 +263,59 @@ async function fetchSteamAppDetailsRaw(appId) {
   return block.data
 }
 
+function decodeHtmlEntities(s) {
+  return String(s || '')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+}
+
+function pickBestSteamSearchMatch(wantTitle, candidates) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return null
+  const want = normText(wantTitle)
+
+  const scored = candidates
+    .filter((c) => c && typeof c === 'object' && c.appId && c.title)
+    .map((c) => {
+      const t = normText(c.title)
+      let score = 0
+      if (t === want) score += 1000
+      if (t.includes(want)) score += 400
+      if (want.includes(t)) score += 250
+      const words = want.split(' ').filter((w) => w.length > 2)
+      for (const w of words) {
+        if (t.includes(w)) score += 30
+      }
+      return { raw: c, score }
+    })
+    .sort((a, b) => b.score - a.score)
+
+  const top = scored[0]
+  if (!top) return null
+  return { ...top.raw, score: top.score }
+}
+
+async function fetchSteamSearchCandidates(term) {
+  const url = `https://store.steampowered.com/search/?term=${encodeURIComponent(term)}`
+  const r = await fetch(url, { headers: { Accept: 'text/html' } })
+  if (!r.ok) return []
+  const html = await r.text()
+
+  const rowRe =
+    /data-ds-appid\s*=\s*"(\d+)"[\s\S]{0,4000}?<span[^>]*class\s*=\s*"title"[^>]*>([^<]*)<\/span>/g
+
+  const out = []
+  for (const m of html.matchAll(rowRe)) {
+    const appId = String(m[1] || '').trim()
+    const title = decodeHtmlEntities(String(m[2] || '').trim())
+    if (!appId || !title) continue
+    out.push({ appId, title })
+  }
+  return out
+}
+
 async function main() {
   const db = await loadDb()
   console.log('[demo-snapshot] harvest source:', CHEAPSHARK_BASE)
@@ -275,7 +337,7 @@ async function main() {
     if (!Array.isArray(db.stores) || db.stores.length === 0) {
       db.stores = await getJson(`${CHEAPSHARK_BASE}/stores`, { allow429: true })
     }
-    if (!ONLY_BACKFILL_EXISTING) {
+    if (!ONLY_BACKFILL_EXISTING && !ONLY_MISSING_PRICES) {
       await runStage(async () =>
         harvestDeals(db, 'popular', (page) => ({
           sortBy: 'Deal Rating',
@@ -308,7 +370,7 @@ async function main() {
       )
     }
 
-    if (!SKIP_SEARCH && !ONLY_BACKFILL_EXISTING) {
+    if (!SKIP_SEARCH && !ONLY_BACKFILL_EXISTING && !ONLY_MISSING_PRICES) {
       await runStage(async () => {
         for (const term of SEARCH_TERMS) {
           const q = term.toLowerCase()
@@ -368,6 +430,151 @@ async function main() {
       }
       db.cursors.curatedSeedIndex = idx
     })
+
+    await runStage(async () => {
+      const candidates = CURATED_POPULAR_TITLES.filter((seed) => {
+        const cur = db.curatedPopular?.[seed]
+        if (!cur) return true
+        const gid = String(cur.gameId ?? '').trim()
+        if (!gid) return true
+        return !hasDeals(db.gameDetails?.[gid])
+      }).slice(0, MISSING_PRICE_PER_RUN)
+
+      for (const seed of candidates) {
+        const cur = db.curatedPopular?.[seed] || {}
+        let gid = String(cur.gameId ?? '').trim()
+        let detail = null
+
+        if (gid) {
+          try {
+            detail = await getJson(`${CHEAPSHARK_BASE}/games?id=${encodeURIComponent(gid)}`, { allow429: true })
+            db.gameDetails[gid] = detail
+            await new Promise((r) => setTimeout(r, 70))
+          } catch {
+            detail = null
+          }
+        }
+
+        if (!hasDeals(detail)) {
+          const searchList = await getJson(
+            `${CHEAPSHARK_BASE}/games?title=${encodeURIComponent(seed)}&limit=30`,
+            { allow429: true },
+          )
+          const pick = pickBestSearchMatch(seed, searchList)
+          const altId = String(pick?.gameID ?? pick?.gameId ?? '').trim()
+          if (altId) {
+            const altDetail = await getJson(`${CHEAPSHARK_BASE}/games?id=${encodeURIComponent(altId)}`, {
+              allow429: true,
+            })
+            db.gameDetails[altId] = altDetail
+            if (hasDeals(altDetail)) {
+              gid = altId
+              const info = altDetail?.info || {}
+              const sid = String(info?.steamAppID ?? pick?.steamAppID ?? '').trim()
+              db.curatedPopular[seed] = {
+                seed,
+                gameId: gid,
+                title: String(info?.title ?? pick?.external ?? seed),
+                thumb: info?.thumb ?? pick?.thumb ?? null,
+                steamAppID: sid && sid !== '0' ? sid : null,
+              }
+            }
+            await new Promise((r) => setTimeout(r, 70))
+          }
+        }
+      }
+    })
+
+    // CheapShark'tan çözülemeyen / db'de olmayan başlıkları direkt Steam'den appId'e çevirip backfill et.
+    // (Amaç: kullanıcı listesini Steam görselleri + Steam appdetails ile desteklemek.)
+    await (async () => {
+      const missingSeeds = CURATED_POPULAR_TITLES.filter((seed) => {
+        const entry = db.curatedPopular?.[seed]
+        const sid = entry?.steamAppID != null ? String(entry.steamAppID).trim() : null
+        if (!sid || sid === '0') return true
+        if (!db.steamAppDetails?.[sid]) return true
+
+        // Seed başlığı ile Steam'deki ad eşleşmiyorsa (örn. Valorant -> Valor gibi) yeniden resolve et.
+        const steamName = db.steamAppDetails?.[sid]?.name ?? db.gameDetails?.[sid]?.info?.title ?? ''
+        if (steamName && normText(steamName) !== normText(seed)) return true
+
+        return false
+      }).slice(0, STEAM_TITLE_RESOLVE_PER_RUN)
+
+      for (const seed of missingSeeds) {
+        try {
+          const candidates = await fetchSteamSearchCandidates(seed)
+          const best = pickBestSteamSearchMatch(seed, candidates)
+
+          // Çok zayıf eşleşme ihtimalinde yanlış appId yazmak yerine "bulunamadı" olarak işaretle.
+          if (!best?.appId || best.score < 600) {
+            // Seed'i başlıkla tut, ama steamAppID boş kalsın.
+            if (!db.gameDetails[seed]) {
+              db.gameDetails[seed] = {
+                info: { title: seed, steamAppID: null, thumb: null },
+                deals: [],
+              }
+            } else {
+              const existingInfo = db.gameDetails[seed]?.info || {}
+              db.gameDetails[seed].info = {
+                ...existingInfo,
+                title: seed,
+                thumb: existingInfo.thumb ?? null,
+                steamAppID: null,
+              }
+              if (!Array.isArray(db.gameDetails[seed].deals)) db.gameDetails[seed].deals = []
+            }
+
+            db.curatedPopular[seed] = {
+              seed,
+              gameId: seed,
+              title: seed,
+              thumb: null,
+              steamAppID: null,
+            }
+
+            continue
+          }
+
+          const appId = best.appId
+          const steamData = db.steamAppDetails?.[appId] || (await fetchSteamAppDetailsRaw(appId))
+          if (!steamData) continue
+
+          db.steamAppDetails[appId] = steamData
+
+          const title = String(steamData.name ?? best?.title ?? seed).trim() || seed
+          const thumb = steamData.header_image != null ? String(steamData.header_image) : null
+
+          if (!db.gameDetails[appId]) {
+            db.gameDetails[appId] = {
+              info: { title, steamAppID: String(appId), thumb },
+              deals: [],
+            }
+          } else {
+            const existingInfo = db.gameDetails[appId]?.info || {}
+            db.gameDetails[appId].info = {
+              ...existingInfo,
+              title,
+              thumb: existingInfo.thumb ?? thumb,
+              steamAppID: existingInfo.steamAppID ?? String(appId),
+            }
+            if (!Array.isArray(db.gameDetails[appId].deals)) db.gameDetails[appId].deals = []
+          }
+
+          db.curatedPopular[seed] = {
+            seed,
+            gameId: String(appId),
+            title,
+            thumb,
+            steamAppID: String(appId),
+          }
+        } catch {
+          // tek seed'de hata olursa durma
+        }
+
+        await new Promise((r) => setTimeout(r, 140))
+      }
+    })()
 
     await runStage(async () => {
       const allGameIds = uniqueGameIdsFromDeals(
@@ -437,6 +644,13 @@ async function main() {
   console.log(
     `[demo-snapshot] sizes curated=${snapshot.curatedPopular.length} popular=${snapshot.popular.length} discounted=${snapshot.discounted.length} new=${snapshot.newReleases.length} free=${snapshot.free100.length} details=${Object.keys(snapshot.gameDetails).length} steam=${Object.keys(snapshot.steamAppDetails).length}`,
   )
+  const curatedNoDeals = CURATED_POPULAR_TITLES.filter((seed) => {
+    const cur = db.curatedPopular?.[seed]
+    const gid = String(cur?.gameId ?? '').trim()
+    if (!gid) return true
+    return !hasDeals(db.gameDetails?.[gid])
+  })
+  console.log(`[demo-snapshot] curated_no_price_count=${curatedNoDeals.length}`)
   if (hit429) {
     console.log('[demo-snapshot] Durum: RATE_LIMIT. Sonra tekrar calistir ve biriktirmeye devam et.')
   } else {
