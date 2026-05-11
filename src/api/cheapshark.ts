@@ -4,6 +4,7 @@ import { releaseYearFromGame } from '../lib/gameRelease'
 import { F2P_POPULAR_SEEDS } from '../lib/freeToPlaySeeds'
 import type { Game, PriceRow } from '../types'
 import { fetchSteamPriceOverview } from './steam'
+import { getDemoManualPriceRows } from '../lib/demoManualPriceRows'
 
 const headers = {
   Accept: 'application/json',
@@ -735,6 +736,9 @@ export async function buildPriceRows(
   game: Game,
   gamePayload: Record<string, unknown>,
 ): Promise<PriceRow[]> {
+  const manual = getDemoManualPriceRows(game)
+  if (manual) return manual
+
   const storeNames = await fetchStoreNames()
   const info = gamePayload.info as Record<string, unknown> | undefined
   const steamFromApi = info?.steamAppID != null ? String(info.steamAppID).trim() : ''
@@ -757,6 +761,9 @@ export async function buildPriceRows(
     if (seenDealRows.has(dedupeKey)) continue
     seenDealRows.add(dedupeKey)
     const name = storeNames[sid] ?? `Mağaza ${sid}`
+    const purchaseUrlRaw = d.purchaseUrl ?? d.purchase_url
+    const purchaseUrl =
+      purchaseUrlRaw != null && String(purchaseUrlRaw).trim() ? String(purchaseUrlRaw).trim() : undefined
     rows.push({
       storeId: sid,
       storeName: name,
@@ -767,6 +774,7 @@ export async function buildPriceRows(
       dealId,
       releaseDate: String(d.releaseDate ?? ''),
       isSteamDirect: false,
+      purchaseUrl: purchaseUrl ?? null,
     })
   }
 

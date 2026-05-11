@@ -38,6 +38,8 @@ export type PriceRow = {
   displaySaleLabel?: string | null
   displayRetailLabel?: string | null
   isSteamDirect: boolean
+  /** Varsa tiklamada bu URL kullanilir (demo sabit fiyat / dogrudan magaza). */
+  purchaseUrl?: string | null
 }
 
 export type SteamPriceOverview = {

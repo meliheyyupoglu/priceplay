@@ -4,19 +4,30 @@ export function steamStoreAppUrl(steamAppId: string): string {
   return `https://store.steampowered.com/app/${encodeURIComponent(steamAppId)}/`
 }
 
-/** Sunucusuz mod: doğrudan CheapShark redirect adresine gider. */
+/** CheapShark yönlendirmesi (dealID sayı veya kodlu olabilir). */
 export function storeDealResolveUrl(dealId: string): string | null {
   const id = dealId?.trim()
-  if (!id || !/^\d+$/.test(id)) return null
+  if (!id) return null
   return `https://www.cheapshark.com/redirect?dealID=${encodeURIComponent(id)}`
 }
 
 export function storePurchaseUrl(row: PriceRow, steamAppId: string | null | undefined): string | null {
+  const direct = row.purchaseUrl?.trim()
+  if (direct) return direct
+
+  const steamApp = steamAppId?.trim() ?? ''
+
   if (row.isSteamDirect) {
-    const sid = steamAppId?.trim()
-    if (sid) return steamStoreAppUrl(sid)
+    if (steamApp) return steamStoreAppUrl(steamApp)
     return null
   }
+
+  // Steam satiri (CheapShark) + bilinen app id: dogrudan Steam oyun sayfasi
+  if (row.storeId === '1' && steamApp) {
+    return steamStoreAppUrl(steamApp)
+  }
+
+  // GOG, Humble, digerleri: CheapShark yonlendirmesi genelde magaza urun sayfasina acar
   return storeDealResolveUrl(row.dealId)
 }
 
