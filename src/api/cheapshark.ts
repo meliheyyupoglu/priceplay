@@ -197,6 +197,75 @@ function filterSnapshotGamesWithPrices(games: Game[], snap: DemoSnapshot): Game[
   return games.filter((g) => snapshotGameHasListablePrice(g, snap))
 }
 
+function steamBannerFromSnapshot(snap: DemoSnapshot, steamAppId: string): string | null {
+  const s = snap.steamAppDetails?.[steamAppId] as Record<string, unknown> | undefined
+  if (!s) return null
+  const h = s.header_image != null ? String(s.header_image).trim() : ''
+  if (h) return h
+  const c = s.capsule_image != null ? String(s.capsule_image).trim() : ''
+  if (c) return c
+  const c5 = s.capsule_imagev5 != null ? String(s.capsule_imagev5).trim() : ''
+  return c5 || null
+}
+
+/** Kart / vitrin icin kapak URL: liste thumb, gameDetails.info.thumb, Steam snapshot. */
+function snapshotThumbUrl(game: Game, snap: DemoSnapshot): string | null {
+  const direct = game.thumb?.trim()
+  if (direct) return direct
+
+  const gid = String(game.gameId ?? '').trim()
+  if (gid) {
+    const payload = snap.gameDetails?.[gid] as Record<string, unknown> | undefined
+    const info = payload?.info as Record<string, unknown> | undefined
+    const th = info?.thumb != null ? String(info.thumb).trim() : ''
+    if (th) return th
+    const sidRaw =
+      (game.steamAppId?.trim() || (info?.steamAppID != null ? String(info.steamAppID).trim() : '')) || ''
+    if (sidRaw && sidRaw !== '0') {
+      const fromSteam = steamBannerFromSnapshot(snap, sidRaw)
+      if (fromSteam) return fromSteam
+    }
+  }
+
+  const t0 = game.title.trim().toLowerCase()
+  if (t0 && t0 !== 'bilinmeyen oyun') {
+    for (const p of Object.values(snap.gameDetails ?? {})) {
+      if (!p || typeof p !== 'object') continue
+      const info = (p as Record<string, unknown>).info as Record<string, unknown> | undefined
+      const t = String(info?.title ?? '').trim().toLowerCase()
+      if (!t) continue
+      if (t !== t0 && !t.includes(t0) && !t0.includes(t)) continue
+      const th = info?.thumb != null ? String(info.thumb).trim() : ''
+      if (th) return th
+      const sid = info?.steamAppID != null ? String(info.steamAppID).trim() : ''
+      if (sid && sid !== '0') {
+        const fromSteam = steamBannerFromSnapshot(snap, sid)
+        if (fromSteam) return fromSteam
+      }
+    }
+  }
+
+  return null
+}
+
+function enrichGameThumbFromSnapshot(game: Game, snap: DemoSnapshot): Game {
+  const u = snapshotThumbUrl(game, snap)
+  if (!u || game.thumb?.trim()) return game
+  return { ...game, thumb: u }
+}
+
+/** Fiyat + kartta gosterilebilir kapak (snapshot'ta cozulebiliyorsa). */
+function filterSnapshotGamesWithCardArt(games: Game[], snap: DemoSnapshot): Game[] {
+  return games
+    .map((g) => enrichGameThumbFromSnapshot(g, snap))
+    .filter((g) => Boolean(g.gameId?.trim()))
+    .filter((g) => Boolean(g.thumb?.trim()))
+    .filter((g) => {
+      const t = g.title.trim().toLowerCase()
+      return t.length > 0 && t !== 'bilinmeyen oyun'
+    })
+}
+
 async function fetchJsonOrFallback<T>(url: string, fallback: T): Promise<T> {
   try {
     const r = await fetch(url, { headers })
@@ -406,9 +475,15 @@ function uniqueDealsToGames(data: unknown[], seen: Set<string>, out: Game[]) {
 export async function fetchPopularGames(pageCount = 4): Promise<Game[]> {
   if (DEMO_SNAPSHOT_MODE) {
     const snap = await getDemoSnapshot()
-    const curated = filterSnapshotGamesWithPrices(parseGamesFromUnknownArray(snap.curatedPopular), snap)
+    const curated = filterSnapshotGamesWithCardArt(
+      filterSnapshotGamesWithPrices(parseGamesFromUnknownArray(snap.curatedPopular), snap),
+      snap,
+    )
     if (curated.length > 0) return curated
-    const list = filterSnapshotGamesWithPrices(parseGamesFromUnknownArray(snap.popular), snap)
+    const list = filterSnapshotGamesWithCardArt(
+      filterSnapshotGamesWithPrices(parseGamesFromUnknownArray(snap.popular), snap),
+      snap,
+    )
     return list.slice(0, Math.max(1, pageCount) * 60)
   }
   const seen = new Set<string>()
