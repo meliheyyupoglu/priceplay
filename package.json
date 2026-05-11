@@ -6,6 +6,7 @@
   "scripts": {
     "start": "vite",
     "snapshot:demo": "node scripts/generate-demo-snapshot.mjs",
+    "annotate:deals": "node scripts/annotate-deal-purchase-urls.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
