@@ -9,6 +9,7 @@ class Game {
     this.thumb,
     this.metacriticScore,
     this.releaseDate,
+    this.promoSource,
   });
 
   final String gameId;
@@ -20,12 +21,15 @@ class Game {
   final String? thumb;
   final String? metacriticScore;
   final String? releaseDate;
+  /// epic = Epic Games Store kampanyası (vitrin açıklaması).
+  final String? promoSource;
 
   factory Game.fromJson(Map<String, dynamic> raw) {
     String asString(dynamic value) => value == null ? "" : value.toString().trim();
     final gameId = asString(raw["gameID"]).isNotEmpty ? asString(raw["gameID"]) : asString(raw["gameId"]);
     final steamRaw = asString(raw["steamAppID"]).isNotEmpty ? asString(raw["steamAppID"]) : asString(raw["steamAppId"]);
     final title = asString(raw["title"]).isNotEmpty ? asString(raw["title"]) : asString(raw["external"]);
+    final ps = asString(raw["promoSource"]);
     return Game(
       gameId: gameId,
       title: title.isEmpty ? "Unknown Game" : title,
@@ -36,6 +40,7 @@ class Game {
       thumb: asString(raw["thumb"]).isEmpty ? null : asString(raw["thumb"]),
       metacriticScore: asString(raw["metacriticScore"]).isEmpty ? null : asString(raw["metacriticScore"]),
       releaseDate: asString(raw["releaseDate"]).isEmpty ? null : asString(raw["releaseDate"]),
+      promoSource: ps.isEmpty ? null : ps,
     );
   }
 }

@@ -203,6 +203,7 @@ class _PriceMeta extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pct = (double.tryParse(game.savings ?? "0") ?? 0).round();
+    final epicLabel = game.promoSource == "epic" && pct >= 95;
     final price = game.cheapest == null || game.cheapest!.trim().isEmpty ? "-" : "\$${game.cheapest}";
     return Wrap(
       crossAxisAlignment: WrapCrossAlignment.center,
@@ -216,7 +217,10 @@ class _PriceMeta extends StatelessWidget {
               color: const Color(0xFF6C4BE7),
               borderRadius: BorderRadius.circular(6),
             ),
-            child: Text("-$pct%", style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+            child: Text(
+              epicLabel ? "Epic — -$pct%" : "-$pct%",
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+            ),
           ),
         Text(price, style: const TextStyle(color: Color(0xFF7EE8BE), fontWeight: FontWeight.w700)),
         if (!compact) const Text("En ucuz teklif", style: TextStyle(color: Color(0xFFBFC4E6), fontSize: 12)),

@@ -56,7 +56,13 @@ export function HomeGameDealsCarousel({ games }: Props) {
                   {oldP && <span className="home-deals-strip-old">{oldP}</span>}
                   <span className="home-deals-strip-sale">{saleLabel}</span>
                 </div>
-                {pct > 0 && <div className="home-deals-strip-save">%{pct} tasarruf edin</div>}
+                {pct > 0 && (
+                  <div className="home-deals-strip-save">
+                    {g.promoSource === 'epic' && pct >= 95
+                      ? `Epic Games Store — %${pct}`
+                      : `%${pct} tasarruf edin`}
+                  </div>
+                )}
               </div>
             </Link>
           )

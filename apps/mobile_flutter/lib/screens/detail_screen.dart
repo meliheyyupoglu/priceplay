@@ -3,11 +3,14 @@ import "dart:math" as math;
 import "package:flutter/material.dart";
 import "package:provider/provider.dart";
 
+import "package:url_launcher/url_launcher.dart";
+
 import "../i18n/app_strings.dart";
 import "../models/game.dart";
 import "../models/price_row.dart";
 import "../services/demo_snapshot_service.dart";
 import "../state/app_state.dart";
+import "../utils/store_purchase_url.dart";
 import "account_screen.dart";
 import "widgets.dart";
 
@@ -88,8 +91,29 @@ class DetailScreen extends StatelessWidget {
             ),
           const SizedBox(height: 12),
           Text(game.title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-          Text("${trEn(lang, "En iyi fiyat", "Best price")}: \$${game.cheapest ?? "-"}"),
-          Text("${trEn(lang, "Indirim", "Savings")}: %${(double.tryParse(game.savings ?? "0") ?? 0).toStringAsFixed(0)}"),
+          Builder(
+            builder: (context) {
+              final sav = double.tryParse(game.savings ?? "0") ?? 0;
+              final epicLine = game.promoSource == "epic" && sav >= 95;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("${trEn(lang, "En iyi fiyat", "Best price")}: \$${game.cheapest ?? "-"}"),
+                  if (epicLine)
+                    Text(
+                      trEn(
+                        lang,
+                        "Indirim: Epic Games Store ucretsiz kampanyasi (%${sav.toStringAsFixed(0)})",
+                        "Discount: Epic Games Store free promo (${sav.toStringAsFixed(0)}% off)",
+                      ),
+                      style: const TextStyle(color: Color(0xFF9EC6FF), fontWeight: FontWeight.w600),
+                    )
+                  else
+                    Text("${trEn(lang, "Indirim", "Savings")}: %${sav.toStringAsFixed(0)}"),
+                ],
+              );
+            },
+          ),
           if ((detail.description ?? "").isNotEmpty) ...[
             const SizedBox(height: 10),
             Text(
@@ -107,7 +131,7 @@ class DetailScreen extends StatelessWidget {
           if (rows.isEmpty)
             Text(trEn(lang, "Fiyat satiri bulunamadi.", "No price rows found."))
           else
-            ...rows.asMap().entries.map((entry) => _PriceRowCard(row: entry.value, rank: entry.key + 1, lang: lang)),
+            ...rows.asMap().entries.map((entry) => _PriceRowCard(row: entry.value, rank: entry.key + 1, lang: lang, game: game)),
         ],
       ),
     );
@@ -271,15 +295,17 @@ class _PriceHistoryCard extends StatelessWidget {
 }
 
 class _PriceRowCard extends StatelessWidget {
-  const _PriceRowCard({required this.row, required this.rank, required this.lang});
+  const _PriceRowCard({required this.row, required this.rank, required this.lang, required this.game});
 
   final PriceRow row;
   final int rank;
   final AppLang lang;
+  final Game game;
 
   @override
   Widget build(BuildContext context) {
     final isBest = rank == 1;
+    final href = storePurchaseUrl(row, game.steamAppId, game.title);
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -288,9 +314,26 @@ class _PriceRowCard extends StatelessWidget {
         border: Border.all(color: isBest ? const Color(0xFF8F6CFF) : const Color(0xFF2A2E4A)),
       ),
       child: ListTile(
+        onTap: href == null
+            ? null
+            : () async {
+                final uri = Uri.parse(href);
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
+              },
         title: Row(
           children: [
-            Expanded(child: Text(row.storeName, style: const TextStyle(fontWeight: FontWeight.w700))),
+            Expanded(
+              child: Text(
+                row.storeName,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: href != null ? const Color(0xFF9EC6FF) : null,
+                  decoration: href != null ? TextDecoration.underline : null,
+                ),
+              ),
+            ),
             if (isBest)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),

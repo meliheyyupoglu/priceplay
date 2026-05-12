@@ -191,7 +191,7 @@ export function GameDetailPage() {
                 </thead>
                 <tbody>
                   {rows.map((r, i) => {
-                    const href = storePurchaseUrl(r, game.steamAppId, game.gameId)
+                    const href = storePurchaseUrl(r, game.steamAppId, game.gameId, game.title)
                     const isBest = i === 0
                     return (
                       <tr key={r.storeId + r.dealId + i} className={isBest ? 'price-row price-row--best' : 'price-row'}>

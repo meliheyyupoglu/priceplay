@@ -6,6 +6,7 @@ class PriceRow {
     required this.retailPrice,
     required this.savings,
     required this.dealId,
+    this.purchaseUrl,
   });
 
   final String storeId;
@@ -14,4 +15,5 @@ class PriceRow {
   final String retailPrice;
   final String savings;
   final String dealId;
+  final String? purchaseUrl;
 }

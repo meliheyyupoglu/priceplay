@@ -343,6 +343,7 @@ function parseGame(raw: Record<string, unknown>): Game | null {
       raw.releaseDate != null && String(raw.releaseDate).trim() !== ''
         ? String(raw.releaseDate)
         : null,
+    promoSource: raw.promoSource === 'epic' ? 'epic' : undefined,
   }
 }
 
@@ -788,8 +789,9 @@ export async function buildPriceRows(
     seenDealRows.add(dedupeKey)
     const name = storeNames[sid] ?? `Mağaza ${sid}`
     const purchaseUrlRaw = d.purchaseUrl ?? d.purchase_url
-    const purchaseUrl =
+    let purchaseUrl: string | undefined =
       purchaseUrlRaw != null && String(purchaseUrlRaw).trim() ? String(purchaseUrlRaw).trim() : undefined
+    if (purchaseUrl && /cheapshark\.com/i.test(purchaseUrl)) purchaseUrl = undefined
     rows.push({
       storeId: sid,
       storeName: name,

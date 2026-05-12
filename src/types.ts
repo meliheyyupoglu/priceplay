@@ -14,6 +14,8 @@ export type Game = {
   steamRatingText?: string | null
   /** CheapShark deal `releaseDate` (çoğunlukla Unix saniye) */
   releaseDate?: string | null
+  /** Örn. Epic Games ücretsiz kampanyası — vitrin açıklaması için */
+  promoSource?: 'epic' | null
 }
 
 export type User = {

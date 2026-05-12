@@ -15,6 +15,7 @@ export const GAME_DEALS_CURATED: Game[] = [
     cheapest: '0.00',
     normalPrice: '19.99',
     savings: '100',
+    promoSource: 'epic',
     thumb:
       'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/2596420/capsule_231x87.jpg?t=1745972134',
   },
@@ -25,6 +26,7 @@ export const GAME_DEALS_CURATED: Game[] = [
     cheapest: '0.00',
     normalPrice: '19.99',
     savings: '100',
+    promoSource: 'epic',
     thumb:
       'https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/2407830/b5f73d55cbca5df86e2feb1a92636ce62bb1439e/capsule_231x87.jpg?t=1778170992',
   },

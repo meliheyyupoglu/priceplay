@@ -142,6 +142,9 @@ class DemoSnapshotService {
     for (final raw in deals) {
       if (raw is! Map<String, dynamic>) continue;
       final sid = raw["storeID"]?.toString() ?? "";
+      final puRaw = (raw["purchaseUrl"] ?? raw["purchase_url"] ?? "").toString().trim();
+      final purchaseUrl =
+          puRaw.isNotEmpty && !puRaw.toLowerCase().contains("cheapshark.com") ? puRaw : null;
       rows.add(
         PriceRow(
           storeId: sid,
@@ -150,6 +153,7 @@ class DemoSnapshotService {
           retailPrice: raw["retailPrice"]?.toString() ?? fallbackGame.normalPrice ?? "0",
           savings: raw["savings"]?.toString() ?? "0",
           dealId: raw["dealID"]?.toString() ?? "",
+          purchaseUrl: purchaseUrl,
         ),
       );
     }
@@ -219,6 +223,37 @@ class DemoSnapshotService {
     return null;
   }
 
+  static const Set<String> _epicShowcaseGameIds = {"289554", "294416"};
+
+  List<PriceRow> _epicShowcaseSyntheticRows(Game g) {
+    final title = g.title.trim().isEmpty ? "game" : g.title.trim();
+    final q = Uri.encodeComponent(title);
+    final epicUrl = "https://store.epicgames.com/en-US/browse?q=$q";
+    final steam = g.steamAppId?.trim() ?? "";
+    final steamUrl = steam.isNotEmpty ? "https://store.steampowered.com/app/${Uri.encodeComponent(steam)}/" : null;
+    return [
+      PriceRow(
+        storeId: "25",
+        storeName: "Epic Games Store",
+        salePrice: g.cheapest ?? "0.00",
+        retailPrice: g.normalPrice ?? "19.99",
+        savings: g.savings ?? "100",
+        dealId: "epic-showcase",
+        purchaseUrl: epicUrl,
+      ),
+      if (steamUrl != null)
+        PriceRow(
+          storeId: "1",
+          storeName: "Steam",
+          salePrice: g.normalPrice ?? "19.99",
+          retailPrice: g.normalPrice ?? "19.99",
+          savings: "0",
+          dealId: "steam-list",
+          purchaseUrl: steamUrl,
+        ),
+    ];
+  }
+
   GameDetailData getGameDetail(String gameId, {Game? seedGame}) {
     final existing = seedGame ?? findGameById(gameId);
     if (existing == null) {
@@ -254,8 +289,12 @@ class DemoSnapshotService {
       thumb: thumb.isNotEmpty ? thumb : existing.thumb,
       metacriticScore: existing.metacriticScore,
       releaseDate: existing.releaseDate,
+      promoSource: existing.promoSource,
     );
-    final rows = _buildPriceRowsFromDeals(payload?["deals"] as List<dynamic>? ?? const [], merged);
+    var rows = _buildPriceRowsFromDeals(payload?["deals"] as List<dynamic>? ?? const [], merged);
+    if (rows.isEmpty && _epicShowcaseGameIds.contains(gameId)) {
+      rows = _epicShowcaseSyntheticRows(merged);
+    }
     final cheapest = rows.isNotEmpty ? rows.first.salePrice : merged.cheapest;
     final topSaving = rows.isNotEmpty ? rows.first.savings : merged.savings;
     final enriched = Game(
@@ -268,6 +307,7 @@ class DemoSnapshotService {
       thumb: merged.thumb,
       metacriticScore: merged.metacriticScore,
       releaseDate: merged.releaseDate,
+      promoSource: merged.promoSource ?? (_epicShowcaseGameIds.contains(gameId) ? "epic" : null),
     );
     return GameDetailData(
       game: enriched,
