@@ -5,6 +5,7 @@ import { F2P_POPULAR_SEEDS } from '../lib/freeToPlaySeeds'
 import type { Game, PriceRow } from '../types'
 import { fetchSteamPriceOverview } from './steam'
 import { getDemoManualPriceRows } from '../lib/demoManualPriceRows'
+import { GAME_DEALS_CURATED } from '../lib/gameDealsCurated'
 
 const headers = {
   Accept: 'application/json',
@@ -114,6 +115,80 @@ function inferCategoryKeyFromSnapshotGame(game: Game, snap: DemoSnapshot): strin
   return genreLabelFor(game.title)
 }
 
+/** Demo snapshot'ta yanlis anahtar (Steam app id / baslik metni) ile kayitli oyunlar — dogru CheapShark gameDetails id'si. */
+function resolveDemoGameDetailLookupId(gameId: string): string {
+  const g = String(gameId || '').trim()
+  const aliases: Record<string, string> = {
+    '813780': '204242',
+    'Age of Empires IV': '230936',
+    'Grand Theft Auto V': '298615',
+  }
+  return aliases[g] ?? g
+}
+
+/** Arama havuzunda tekrarlayan / hatali gameDetails anahtarlarini atla (canonical id baska girdide). */
+function shouldSkipStaleDemoGameDetailKey(gameId: string): boolean {
+  const g = String(gameId || '').trim()
+  return g === 'Grand Theft Auto V' || g === '813780' || g === 'Age of Empires IV'
+}
+
+function mergeDemoDealsFromSameTitle(
+  hit: Record<string, unknown>,
+  snap: DemoSnapshot,
+  lookupKey: string,
+): Record<string, unknown> {
+  const existing = hit.deals as unknown[] | undefined
+  if (Array.isArray(existing) && existing.length > 0) return hit
+  const info = hit.info as Record<string, unknown> | undefined
+  const title = String(info?.title ?? '').trim().toLowerCase()
+  if (!title) return hit
+  let best: { deals: unknown[]; info?: Record<string, unknown>; n: number } | null = null
+  for (const [gid, payload] of Object.entries(snap.gameDetails ?? {})) {
+    if (gid === lookupKey || shouldSkipStaleDemoGameDetailKey(gid)) continue
+    if (!payload || typeof payload !== 'object') continue
+    const p = payload as Record<string, unknown>
+    const inf = p.info as Record<string, unknown> | undefined
+    const t2 = String(inf?.title ?? '').trim().toLowerCase()
+    if (t2 !== title) continue
+    const d = p.deals as unknown[] | undefined
+    const n = Array.isArray(d) ? d.length : 0
+    if (n === 0) continue
+    if (!best || n > best.n) best = { deals: d as unknown[], info: inf, n }
+  }
+  if (!best) return hit
+  const mergedInfo = { ...(best.info ?? {}), ...info }
+  return { ...hit, deals: best.deals, info: mergedInfo }
+}
+
+function buildCuratedDealsOnlyPayload(gameId: string): Record<string, unknown> | null {
+  const c = GAME_DEALS_CURATED.find((x) => x.gameId === gameId)
+  if (!c) return null
+  return {
+    info: {
+      title: c.title,
+      thumb: c.thumb ?? null,
+      steamAppID: c.steamAppId ?? null,
+    },
+    deals: [],
+  } as Record<string, unknown>
+}
+
+function enrichPayloadInfoFromCurated(gameId: string, payload: Record<string, unknown>): Record<string, unknown> {
+  const c = GAME_DEALS_CURATED.find((x) => x.gameId === gameId)
+  if (!c) return payload
+  const info = (payload.info as Record<string, unknown>) ?? {}
+  const title = String(info.title ?? '').trim()
+  const badTitle = !title || title === gameId
+  const outInfo: Record<string, unknown> = { ...info }
+  if (badTitle) outInfo.title = c.title
+  if (!String(outInfo.thumb ?? '').trim() && c.thumb) outInfo.thumb = c.thumb
+  const sid = outInfo.steamAppID != null ? String(outInfo.steamAppID).trim() : ''
+  if (!sid || sid === '0') {
+    if (c.steamAppId) outInfo.steamAppID = c.steamAppId
+  }
+  return { ...payload, info: outInfo }
+}
+
 function buildFallbackGamePayloadFromSnapshot(
   gameId: string,
   snap: DemoSnapshot,
@@ -194,6 +269,13 @@ function snapshotGameHasListablePrice(game: Game, snap: DemoSnapshot): boolean {
   return false
 }
 
+/** Demo: gameDetails'ta baslik anahtarli sahte GTA satiri; canonical 298615 varken listeden cikar. */
+function stripInferiorDuplicateGtaRows(list: Game[]): Game[] {
+  const id = '298615'
+  if (!list.some((g) => String(g.gameId) === id)) return list
+  return list.filter((g) => String(g.gameId) !== 'Grand Theft Auto V')
+}
+
 function injectGrandTheftAutoSearchIfMissing(
   queryRaw: string,
   snap: DemoSnapshot,
@@ -201,11 +283,12 @@ function injectGrandTheftAutoSearchIfMissing(
   limit: number,
 ): Game[] {
   const n = queryRaw.trim().toLowerCase()
-  if (!/\bgta\b|gta\s*5|gta\s*v\b|grand\s*theft/.test(n)) return list.slice(0, limit)
+  const base = stripInferiorDuplicateGtaRows(list)
+  if (!/\bgta\b|gta\s*5|gta\s*v\b|grand\s*theft/.test(n)) return base.slice(0, limit)
   const id = '298615'
-  if (list.some((g) => String(g.gameId) === id)) return list.slice(0, limit)
+  if (base.some((g) => String(g.gameId) === id)) return base.slice(0, limit)
   const detail = snap.gameDetails?.[id] as Record<string, unknown> | undefined
-  if (!detail || typeof detail !== 'object') return list.slice(0, limit)
+  if (!detail || typeof detail !== 'object') return base.slice(0, limit)
   const info = detail.info as Record<string, unknown> | undefined
   const g: Game = {
     gameId: id,
@@ -216,8 +299,8 @@ function injectGrandTheftAutoSearchIfMissing(
         : null,
     thumb: info?.thumb != null ? String(info.thumb) : null,
   }
-  if (!snapshotGameHasListablePrice(g, snap)) return list.slice(0, limit)
-  const rest = list.filter((x) => String(x.gameId) !== id)
+  if (!snapshotGameHasListablePrice(g, snap)) return base.slice(0, limit)
+  const rest = base.filter((x) => String(x.gameId) !== id && String(x.gameId) !== 'Grand Theft Auto V')
   return [g, ...rest].slice(0, limit)
 }
 
@@ -694,6 +777,7 @@ export async function searchGames(title: string, limit = 20): Promise<Game[]> {
     }
     // Curated/gameDetails içindeki ama listelerde görünmeyen başlıkları da aramaya ekle.
     for (const [gameId, payload] of Object.entries(snap.gameDetails ?? {})) {
+      if (shouldSkipStaleDemoGameDetailKey(gameId)) continue
       const info = payload?.info as Record<string, unknown> | undefined
       const t = String(info?.title ?? '').trim()
       if (!t) continue
@@ -729,15 +813,22 @@ export async function searchGames(title: string, limit = 20): Promise<Game[]> {
 export async function fetchGameJson(gameId: string): Promise<Record<string, unknown>> {
   if (DEMO_SNAPSHOT_MODE) {
     const snap = await getDemoSnapshot()
-    const hit = snap.gameDetails?.[String(gameId)]
-    if (hit && typeof hit === 'object') return hit
-    const fallbackFromDeals = buildFallbackGamePayloadFromSnapshot(String(gameId), snap)
-    if (fallbackFromDeals) return fallbackFromDeals
-    const fallbackTitle = String(gameId || 'Unknown Game').trim() || 'Unknown Game'
-    return {
+    const rawId = String(gameId).trim()
+    const lookupId = resolveDemoGameDetailLookupId(rawId)
+    const hit = snap.gameDetails?.[lookupId]
+    if (hit && typeof hit === 'object') {
+      const merged = mergeDemoDealsFromSameTitle({ ...(hit as Record<string, unknown>) }, snap, lookupId)
+      return enrichPayloadInfoFromCurated(rawId, merged)
+    }
+    const fallbackFromDeals = buildFallbackGamePayloadFromSnapshot(rawId, snap)
+    if (fallbackFromDeals) return enrichPayloadInfoFromCurated(rawId, fallbackFromDeals)
+    const curatedOnly = buildCuratedDealsOnlyPayload(rawId)
+    if (curatedOnly) return enrichPayloadInfoFromCurated(rawId, curatedOnly)
+    const fallbackTitle = String(rawId || 'Unknown Game').trim() || 'Unknown Game'
+    return enrichPayloadInfoFromCurated(rawId, {
       info: { title: fallbackTitle, steamAppID: null, thumb: null },
       deals: [],
-    } as Record<string, unknown>
+    } as Record<string, unknown>)
   }
   const url = `${CHEAPSHARK_BASE}/games?id=${encodeURIComponent(gameId)}`
   const r = await fetch(url, { headers })
