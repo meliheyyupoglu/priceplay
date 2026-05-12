@@ -13,6 +13,7 @@ import {
 import type { Game } from '../types'
 import { GameCard } from '../components/GameCard'
 import { rotateByDailyOffset, sortGamesByMetacriticDesc, uniqueByGameKey } from '../lib/highlightUtils'
+import { filterExcludedGameDeals, mergeGameDealsCurated } from '../lib/gameDealsCurated'
 
 type Kind = 'popular' | 'discounted' | 'free-popular' | 'free-100' | 'new-releases' | 'discover-all'
 
@@ -50,7 +51,7 @@ export function BrowseListPage() {
     k === 'free-popular'
       ? 'Sürekli ücretsiz (F2P) bilinen başlıklar; Metacritic’e göre yüksekten düşüğe. Geçici %100 indirimli ücretsiz teklifler bu listede yok.'
       : k === 'free-100'
-        ? 'Veri setindeki 0$ oyunlar.'
+        ? 'Şu an ücretsiz veya çok düşük fiyatlı kampanya teklifleri (Epic Games Store, Steam ve diğer mağazalar).'
         : k === 'new-releases'
           ? 'Çıkış tarihi bilinen oyunlar arasından en yeni tarihe göre sıralanır.'
           : k === 'discover-all'
@@ -77,7 +78,9 @@ export function BrowseListPage() {
             ? sortGamesByMetacriticDesc(unique)
             : k === 'free-popular' || k === 'new-releases' || k === 'discover-all'
               ? unique
-              : rotateByDailyOffset(unique)
+              : k === 'free-100'
+                ? mergeGameDealsCurated(filterExcludedGameDeals(unique), 500)
+                : rotateByDailyOffset(unique)
         if (!cancelled) setGames(list)
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Yükleme hatası')

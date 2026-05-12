@@ -27,7 +27,7 @@ export function HomeGameDealsCarousel({ games }: Props) {
               →
             </span>
           </h2>
-          <p className="home-deals-strip-sub muted">0 dolara düşen oyunlar</p>
+          <p className="home-deals-strip-sub muted">Ücretsiz ve dikkate değer indirim fırsatları</p>
         </div>
       </div>
 
@@ -52,12 +52,11 @@ export function HomeGameDealsCarousel({ games }: Props) {
               </div>
               <div className="home-deals-strip-meta">
                 <div className="home-deals-strip-name">{g.title}</div>
-                <div className="home-deals-strip-dev muted">Ucretsiz teklif</div>
                 <div className="home-deals-strip-prices">
                   {oldP && <span className="home-deals-strip-old">{oldP}</span>}
                   <span className="home-deals-strip-sale">{saleLabel}</span>
                 </div>
-                <div className="home-deals-strip-save">%{pct} tasarruf edin</div>
+                {pct > 0 && <div className="home-deals-strip-save">%{pct} tasarruf edin</div>}
               </div>
             </Link>
           )

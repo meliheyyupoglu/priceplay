@@ -6,6 +6,7 @@ import "../models/game.dart";
 import "../models/user.dart";
 import "../services/auth_service.dart";
 import "../services/demo_snapshot_service.dart";
+import "../config/game_deals_curated.dart";
 import "../utils/genre_label.dart";
 
 class AppState extends ChangeNotifier {
@@ -41,12 +42,38 @@ class AppState extends ChangeNotifier {
   }
 
   List<Game> get popular => _withPrice(_service.fetchPopularGames());
+
+  /// Popüler vitrinde Grand Theft Auto V (CheapShark `298615`) öne alınır.
+  List<Game> popularForHome() {
+    final base = _withPrice(popular);
+    if (base.any((g) => g.gameId == "298615")) return base;
+    final gta = _service
+        .getGameDetail("298615", seedGame: const Game(gameId: "298615", title: "Grand Theft Auto V"))
+        .game;
+    if (!_hasPrice(gta)) return base;
+    return _withPrice([gta, ...base]);
+  }
   List<Game> get discounted => _withPrice(_service.fetchDiscountedGames());
   List<Game> get freeGames => _withPrice(_service.fetchFreeGames());
   List<Game> get newReleases => _withPrice(_service.fetchNewReleases());
   List<Game> get allKnown => _withPrice(_service.fetchAllKnownGames());
 
-  List<Game> search(String query) => _withPrice(_service.searchGames(query));
+  bool _matchesGtaSearchQuery(String query) {
+    final q = query.trim().toLowerCase();
+    if (q.length < 3) return false;
+    return q.contains("gta") || q.contains("grand theft");
+  }
+
+  List<Game> search(String query) {
+    final base = _withPrice(_service.searchGames(query));
+    if (!_matchesGtaSearchQuery(query)) return base;
+    if (base.any((g) => g.gameId == "298615")) return base;
+    final gta = _service
+        .getGameDetail("298615", seedGame: const Game(gameId: "298615", title: "Grand Theft Auto V"))
+        .game;
+    if (!_hasPrice(gta)) return base;
+    return _withPrice([gta, ...base]);
+  }
   Game? findById(String id) => _service.findGameById(id);
   DemoSnapshotService get service => _service;
 
@@ -185,6 +212,16 @@ class AppState extends ChangeNotifier {
     return p <= 0.01;
   }
 
+  bool _isHundredPercentDeal(Game g) {
+    final sale = double.tryParse((g.cheapest ?? "").replaceAll(",", ".")) ?? 999;
+    final retail = double.tryParse((g.normalPrice ?? "").replaceAll(",", ".")) ?? 0;
+    final sav = double.tryParse((g.savings ?? "").replaceAll(",", ".")) ?? 0;
+    if (sale > 0.05) return false;
+    if (retail < 0.5) return false;
+    if (sav < 99) return false;
+    return true;
+  }
+
   List<Game> freePopular() {
     final free100Keys = {
       for (final g in freeGames) (g.gameId.isNotEmpty ? g.gameId : g.title),
@@ -200,14 +237,15 @@ class AppState extends ChangeNotifier {
   }
 
   List<Game> hundredOffDeals() {
-    final fromAll = _withPrice(allKnown).where(_isZeroDollar).toList();
-    final fromFree = _withPrice(freeGames).where(_isZeroDollar).toList();
     final merged = <String, Game>{};
-    for (final g in [...fromAll, ...fromFree]) {
+    for (final g in [..._withPrice(allKnown), ..._withPrice(freeGames)]) {
+      if (!_isHundredPercentDeal(g)) continue;
+      if (isExcludedFromGameDeals(g)) continue;
       final key = g.gameId.isNotEmpty ? g.gameId : g.title;
       if (!merged.containsKey(key)) merged[key] = g;
     }
-    final pool = merged.values.toList()..shuffle(Random(DateTime.now().day));
+    final pool = mergeGameDealsCurated(merged.values.toList(), max: 400);
+    pool.shuffle(Random(DateTime.now().day));
     return pool;
   }
 

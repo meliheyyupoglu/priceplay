@@ -194,6 +194,33 @@ function snapshotGameHasListablePrice(game: Game, snap: DemoSnapshot): boolean {
   return false
 }
 
+function injectGrandTheftAutoSearchIfMissing(
+  queryRaw: string,
+  snap: DemoSnapshot,
+  list: Game[],
+  limit: number,
+): Game[] {
+  const n = queryRaw.trim().toLowerCase()
+  if (!/\bgta\b|gta\s*5|gta\s*v\b|grand\s*theft/.test(n)) return list.slice(0, limit)
+  const id = '298615'
+  if (list.some((g) => String(g.gameId) === id)) return list.slice(0, limit)
+  const detail = snap.gameDetails?.[id] as Record<string, unknown> | undefined
+  if (!detail || typeof detail !== 'object') return list.slice(0, limit)
+  const info = detail.info as Record<string, unknown> | undefined
+  const g: Game = {
+    gameId: id,
+    title: String(info?.title ?? 'Grand Theft Auto V'),
+    steamAppId:
+      info?.steamAppID != null && String(info.steamAppID).trim() !== '0'
+        ? String(info.steamAppID).trim()
+        : null,
+    thumb: info?.thumb != null ? String(info.thumb) : null,
+  }
+  if (!snapshotGameHasListablePrice(g, snap)) return list.slice(0, limit)
+  const rest = list.filter((x) => String(x.gameId) !== id)
+  return [g, ...rest].slice(0, limit)
+}
+
 function filterSnapshotGamesWithPrices(games: Game[], snap: DemoSnapshot): Game[] {
   return games.filter((g) => snapshotGameHasListablePrice(g, snap))
 }
@@ -683,9 +710,8 @@ export async function searchGames(title: string, limit = 20): Promise<Game[]> {
       if (!snapshotGameHasListablePrice(g, snap)) continue
       uniq.set(k, g)
     }
-    return [...uniq.values()]
-      .filter((g) => g.title.toLowerCase().includes(q))
-      .slice(0, limit)
+    const rawList = [...uniq.values()].filter((g) => g.title.toLowerCase().includes(q))
+    return injectGrandTheftAutoSearchIfMissing(title, snap, rawList, limit)
   }
   const q = encodeURIComponent(title.trim())
   const url = `${CHEAPSHARK_BASE}/games?title=${q}&limit=${limit}`

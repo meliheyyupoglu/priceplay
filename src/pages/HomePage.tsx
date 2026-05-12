@@ -19,6 +19,7 @@ import { IconSearch } from '../components/NavIcons'
 import { HomePopularFreeGrid } from '../components/HomePopularFreeGrid'
 import { HomeGameDealsCarousel } from '../components/HomeGameDealsCarousel'
 import { HomeDiscoverGrid } from '../components/HomeDiscoverGrid'
+import { filterExcludedGameDeals, mergeGameDealsCurated } from '../lib/gameDealsCurated'
 
 const HOME_PREVIEW = 10
 const FETCH_PAGES = 4
@@ -50,11 +51,6 @@ function buildThumbsByCategory(categories: BrowseCategory[], games: Game[]): Rec
 function isNearFree(game: Game): boolean {
   const p = Number.parseFloat(String(game.cheapest ?? '').replace(',', '.'))
   return Number.isFinite(p) && p >= 0 && p <= 0.05
-}
-
-function isZeroDollar(game: Game): boolean {
-  const p = Number.parseFloat(String(game.cheapest ?? '').replace(',', '.'))
-  return Number.isFinite(p) && p <= 0.01
 }
 
 export function HomePage() {
@@ -118,22 +114,32 @@ export function HomePage() {
         if (cancelled) return
         const pUnique = uniqueByGameKey(pRaw)
         const dUnique = uniqueByGameKey(dRaw)
-        const hoUnique = uniqueByGameKey(hoRaw).slice(0, HOME_100_CAROUSEL)
+        const hoFiltered = filterExcludedGameDeals(uniqueByGameKey(hoRaw))
+        const hoUnique = hoFiltered.slice(0, HOME_100_CAROUSEL)
         const discoverPool = uniqueByGameKey(allRaw)
-        const hoKeys = new Set(hoUnique.map((g) => g.gameId || g.title))
+        const hundredCarousel = mergeGameDealsCurated(pickRandomGames(hoUnique, HOME_100_CAROUSEL), HOME_100_CAROUSEL)
+        const hoKeys = new Set(hundredCarousel.map((g) => g.gameId || g.title))
         const dWithoutDeals = dUnique.filter((g) => !hoKeys.has(g.gameId || g.title))
         setThumbPool(discoverPool.length > 0 ? discoverPool : pUnique)
-        setPopular(popularPreviewByMetacritic(pUnique, HOME_PREVIEW))
+        const gtaForPopular =
+          discoverPool.find((g) => g.gameId === '298615') ||
+          dUnique.find((g) => g.gameId === '298615') ||
+          pUnique.find((g) => g.gameId === '298615') ||
+          null
+        let popularOut: Game[]
+        if (gtaForPopular) {
+          const withoutGta = pUnique.filter((g) => g.gameId !== '298615')
+          popularOut = [
+            gtaForPopular,
+            ...popularPreviewByMetacritic(withoutGta, HOME_PREVIEW - 1),
+          ].slice(0, HOME_PREVIEW)
+        } else {
+          popularOut = popularPreviewByMetacritic(pUnique, HOME_PREVIEW)
+        }
+        setPopular(popularOut)
         setDiscounted(dWithoutDeals.slice(0, HOME_PREVIEW))
         setDiscoverGames(pickRandomGames(discoverPool, HOME_100_CAROUSEL))
-        const zeroDollarPool = discoverPool.filter(isZeroDollar)
-        const fallbackPool = hoUnique.filter(isZeroDollar)
-        setHundredOff(
-          pickRandomGames(
-            zeroDollarPool.length > 0 ? zeroDollarPool : fallbackPool,
-            HOME_100_CAROUSEL,
-          ),
-        )
+        setHundredOff(hundredCarousel)
         const freeFromPopular = pUnique.filter((g) => isNearFree(g) && !hoKeys.has(g.gameId || g.title))
         setFreePopular(freeFromPopular.slice(0, HOME_FREE_GRID))
         if (!cancelled) setLoading(false)

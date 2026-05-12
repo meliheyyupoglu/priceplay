@@ -106,7 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final state = context.watch<AppState>();
     final lang = state.lang;
     if (!state.isReady) return const Center(child: CircularProgressIndicator());
-    final popular = state.popular.take(20).toList();
+    final popular = state.popularForHome().take(20).toList();
     final discounted = state.discountedWithoutZeroDollar().take(20).toList();
     final discoverPool = state.discoverShuffled();
     final discoverCarousel = discoverPool.take(25).toList();
@@ -115,7 +115,11 @@ class _HomeScreenState extends State<HomeScreen> {
         .take(10)
         .map((g) => state.service.getGameDetail(g.gameId.isNotEmpty ? g.gameId : g.title, seedGame: g).game)
         .toList();
-    final dealTop = state.hundredOffDeals().take(25).toList();
+    final dealTop = state
+        .hundredOffDeals()
+        .take(25)
+        .map((g) => state.service.getGameDetail(g.gameId.isNotEmpty ? g.gameId : g.title, seedGame: g).game)
+        .toList();
     _bindPopularAutoScroll(popularTop10.length);
 
     return ListView(
@@ -172,13 +176,20 @@ class _HomeScreenState extends State<HomeScreen> {
         SectionHeader(
           title: trEn(lang, "Oyun Firsatlari", "Game Deals"),
           trailing: TextButton(
-            onPressed: () => _openBrowseKind(context, "free-100", "Oyun Firsatlari", "Game Deals", subtitleTr: "Veri setindeki 0\$ oyunlar.", subtitleEn: "0-dollar games from the dataset."),
+            onPressed: () => _openBrowseKind(
+              context,
+              "free-100",
+              "Oyun Firsatlari",
+              "Game Deals",
+              subtitleTr: "Ucretsiz ve yuksek indirimli kampanya teklifleri (Epic, Steam vb.).",
+              subtitleEn: "Free and deep promotional deals (Epic Games Store, Steam, etc.).",
+            ),
             child: Text(trEn(lang, "Tumunu gor", "See all")),
           ),
         ),
         const SizedBox(height: 8),
         if (dealTop.isEmpty)
-          Text(trEn(lang, "Su an 0 dolar firsat bulunamadi.", "No 0-dollar deals found right now."))
+          Text(trEn(lang, "Su an listelenecek firsat yok.", "No deals to show right now."))
         else
           SizedBox(
             height: 215,
