@@ -5,6 +5,9 @@
  *   node scripts/refresh-demo-prices.mjs
  *   MAX_GAME_DETAILS=400 node scripts/refresh-demo-prices.mjs
  *   CURATED_ONLY=1 node scripts/refresh-demo-prices.mjs
+ *   POPULAR_PRICES_ONLY=1 node scripts/refresh-demo-prices.mjs
+ *     — Sadece vitrin (curatedPopular) fiyatlari: `games?id=` (404 ise snapshot eslesmesi; gerekirse tek `games?title=`).
+ *     POPULAR_ALLOW_SEARCH=0 ile baslik aramasini kapat (daha az istek).
  *
  * SAVE_EVERY_N_DEALS=5 : deal asamasinda her N basarili guncellemede diske yazar (429 kesilse bile kayip azalir).
  */
@@ -25,6 +28,9 @@ const DELAY_MS = Math.max(80, Number(process.env.REFRESH_DELAY_MS || 200))
 const STEAM_DELAY_MS = Math.max(80, Number(process.env.STEAM_DELAY_MS || 120))
 const START_PAUSE_MS = Math.max(0, Number(process.env.START_PAUSE_MS || 45000))
 const CURATED_ONLY = String(process.env.CURATED_ONLY || '0').trim() === '1'
+const POPULAR_PRICES_ONLY = String(process.env.POPULAR_PRICES_ONLY || '0').trim() === '1'
+const POPULAR_ALLOW_SEARCH =
+  POPULAR_PRICES_ONLY && String(process.env.POPULAR_ALLOW_SEARCH ?? '1').trim() === '1'
 const SAVE_EVERY_N_DEALS = Math.max(1, Number(process.env.SAVE_EVERY_N_DEALS || 5))
 
 async function sleep(ms) {
@@ -55,6 +61,82 @@ async function getJson(url, { retriesPerWave = 4, waves = 5 } = {}) {
     }
   }
   throw new Error('429: istek limiti (tum dalgalar)')
+}
+
+/** 404 ise null; 429 ise getJson ile tam deneme. */
+async function getGameDetailOrNull(id) {
+  const url = `${CHEAP}/games?id=${encodeURIComponent(String(id).trim())}`
+  const res = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'PricePlayRefresh/1.0' } })
+  if (res.status === 404) return null
+  if (res.status === 429) return getJson(url)
+  if (!res.ok) {
+    const t = await res.text().catch(() => '')
+    throw new Error(`${res.status} ${t.slice(0, 120)}`)
+  }
+  return res.json()
+}
+
+function findNumericDetailKeyForRow(snapshot, row) {
+  const seed = normText(row?.seed || '')
+  const title = normText(row?.title || '')
+  let bestKey = null
+  let bestScore = -1
+  for (const [k, payload] of Object.entries(snapshot.gameDetails || {})) {
+    if (!/^\d+$/.test(k)) continue
+    const t = normText(payload?.info?.title || '')
+    if (!t) continue
+    let score = 0
+    if (seed) {
+      if (t === seed) score += 5000
+      else if (t.includes(seed) || seed.includes(t)) score += 2000
+    }
+    if (title) {
+      if (t === title) score += 4500
+      else if (t.includes(title) || title.includes(t)) score += 1800
+    }
+    if (score === 0) continue
+    const n = Array.isArray(payload?.deals) ? payload.deals.length : 0
+    const total = score + Math.min(n, 50)
+    if (total > bestScore) {
+      bestScore = total
+      bestKey = k
+    }
+  }
+  return bestKey
+}
+
+async function fetchFreshDealsForCuratedRow(row, snapshot, allowSearch) {
+  const urlKey = String(row?.gameId ?? row?.seed ?? '').trim()
+  if (!urlKey) return null
+  const tryIds = []
+  const g = String(row?.gameId ?? '').trim()
+  if (/^\d+$/.test(g)) tryIds.push(g)
+  const fromSnap = findNumericDetailKeyForRow(snapshot, row)
+  if (fromSnap && !tryIds.includes(fromSnap)) tryIds.push(fromSnap)
+  for (const id of tryIds) {
+    const incoming = await getGameDetailOrNull(id)
+    if (incoming && hasDeals(incoming)) return { incoming, fetchId: id, urlKey }
+    await sleep(Math.max(DELAY_MS, 340))
+  }
+  const seed = String(row?.seed ?? '').trim()
+  if (allowSearch && seed) {
+    const searchList = await getJson(`${CHEAP}/games?title=${encodeURIComponent(seed)}&limit=12`)
+    const pick = pickBestSearchMatch(seed, searchList)
+    const gid = String(pick?.gameID ?? pick?.gameId ?? '').trim()
+    await sleep(Math.max(DELAY_MS, 340))
+    if (gid && /^\d+$/.test(gid)) {
+      const incoming = await getGameDetailOrNull(gid)
+      if (incoming && hasDeals(incoming)) return { incoming, fetchId: gid, urlKey }
+    }
+  }
+  return null
+}
+
+function pruneDuplicateGtaCuratedRow(snapshot) {
+  const rows = snapshot.curatedPopular || []
+  const has298615 = rows.some((r) => String(r?.gameId) === '298615')
+  if (!has298615) return
+  snapshot.curatedPopular = rows.filter((r) => String(r?.gameId) !== 'Grand Theft Auto V')
 }
 
 function normText(s) {
@@ -89,6 +171,28 @@ function pickBestSearchMatch(seed, list) {
 function hasDeals(payload) {
   const deals = payload?.deals
   return Array.isArray(deals) && deals.length > 0
+}
+
+/** games?id deals dizisinden en ucuz teklif (kart / liste fiyati). */
+function pickBestDealPrices(deals) {
+  if (!Array.isArray(deals) || deals.length === 0) return null
+  let best = null
+  let bestP = Infinity
+  for (const d of deals) {
+    if (!d || typeof d !== 'object') continue
+    const p = parseFloat(String(d.price ?? d.salePrice ?? '999'))
+    if (!Number.isFinite(p)) continue
+    if (p < bestP) {
+      bestP = p
+      best = d
+    }
+  }
+  if (!best) return null
+  return {
+    cheapest: String(best.price ?? best.salePrice ?? '0'),
+    normalPrice: String(best.retailPrice ?? '0'),
+    savings: String(best.savings ?? '0'),
+  }
 }
 
 function syncCuratedRowsFromDetails(snapshot) {
@@ -196,6 +300,67 @@ async function refreshCuratedBySearch(snapshot) {
   console.log(`[refresh] curated tamam: ok=${ok} fail=${fail}`)
 }
 
+/**
+ * Sadece populer vitrin (curatedPopular): fiyat/deals guncellenir; baslik/kapak icin mevcut info korunur.
+ * gameId bazen Steam id — once games?id, 404 ise snapshot icinde baslik eslesmesi, sonra istege bagli tek title arama.
+ */
+async function refreshCuratedPopularPricesOnly(snapshot) {
+  pruneDuplicateGtaCuratedRow(snapshot)
+  const rows = snapshot.curatedPopular || []
+  let ok = 0
+  let fail = 0
+  let sinceFlush = 0
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    if (!row) continue
+    const urlKey = String(row.gameId ?? row.seed ?? '').trim()
+    if (!urlKey) continue
+    try {
+      const res = await fetchFreshDealsForCuratedRow(row, snapshot, POPULAR_ALLOW_SEARCH)
+      if (!res) {
+        fail++
+        console.warn(`[refresh] popular-fiyat yok: ${row.seed || urlKey}`)
+        await sleep(Math.max(DELAY_MS, 340))
+        continue
+      }
+      const { incoming, urlKey: storeKey } = res
+      snapshot.gameDetails = snapshot.gameDetails || {}
+      const had = snapshot.gameDetails[storeKey]
+      if (had && typeof had === 'object' && had.info && typeof had.info === 'object') {
+        snapshot.gameDetails[storeKey] = {
+          ...had,
+          deals: Array.isArray(incoming?.deals) ? incoming.deals : had.deals || [],
+        }
+      } else if (had && typeof had === 'object') {
+        snapshot.gameDetails[storeKey] = {
+          ...had,
+          deals: Array.isArray(incoming?.deals) ? incoming.deals : [],
+          info: { ...(typeof had.info === 'object' ? had.info : {}), ...(incoming?.info || {}) },
+        }
+      } else {
+        snapshot.gameDetails[storeKey] = incoming
+      }
+      const pr = pickBestDealPrices(incoming?.deals)
+      if (pr) {
+        row.cheapest = pr.cheapest
+        row.normalPrice = pr.normalPrice
+        row.savings = pr.savings
+      }
+      ok++
+      sinceFlush++
+      if (sinceFlush >= SAVE_EVERY_N_DEALS) {
+        sinceFlush = 0
+        await flushSnapshotToDisk(snapshot)
+      }
+    } catch (e) {
+      fail++
+      console.warn(`[refresh] popular-fiyat ${row.seed || urlKey}: ${e.message || e}`)
+    }
+    await sleep(Math.max(DELAY_MS, 340))
+  }
+  console.log(`[refresh] populer vitrin fiyat: ok=${ok} fail=${fail}`)
+}
+
 function steamIdsPrioritized(snapshot, dealGameIds) {
   const ids = []
   const seen = new Set()
@@ -228,16 +393,24 @@ async function main() {
   const raw = await readFile(SNAPSHOT_PUBLIC, 'utf8')
   const snapshot = JSON.parse(raw)
 
-  if (START_PAUSE_MS > 0) {
-    console.log(`[refresh] baslangic beklemesi ${START_PAUSE_MS / 1000}s (API limit)`)
-    await sleep(START_PAUSE_MS)
+  const startPause = POPULAR_PRICES_ONLY ? 0 : START_PAUSE_MS
+  if (startPause > 0) {
+    console.log(`[refresh] baslangic beklemesi ${startPause / 1000}s (API limit)`)
+    await sleep(startPause)
   }
 
-  console.log('[refresh] Asama 1: vitrin (curated) baslik + detay')
-  await refreshCuratedBySearch(snapshot)
+  if (POPULAR_PRICES_ONLY) {
+    console.log(
+      '[refresh] Mod: POPULAR_PRICES_ONLY — curatedPopular fiyat (games?id + gerekirse tek title arama; Steam yok)',
+    )
+    await refreshCuratedPopularPricesOnly(snapshot)
+  } else {
+    console.log('[refresh] Asama 1: vitrin (curated) baslik + detay')
+    await refreshCuratedBySearch(snapshot)
+  }
 
-  const ids = CURATED_ONLY ? [] : prioritizedDealGameIds(snapshot)
-  if (!CURATED_ONLY) {
+  const ids = CURATED_ONLY || POPULAR_PRICES_ONLY ? [] : prioritizedDealGameIds(snapshot)
+  if (!CURATED_ONLY && !POPULAR_PRICES_ONLY) {
     console.log(`[refresh] Asama 2: CheapShark games?id — ${ids.length} oyun (deal gameID, max ${MAX_GAME_DETAILS})`)
   }
 
@@ -263,13 +436,14 @@ async function main() {
     }
     await sleep(DELAY_MS)
   }
-  if (!CURATED_ONLY && ids.length > 0) {
+  if (!CURATED_ONLY && !POPULAR_PRICES_ONLY && ids.length > 0) {
     console.log(`[refresh] deal-id tamam: ok=${ok} fail=${fail}`)
   }
 
-  if (STEAM_DETAILS_CAP > 0) {
+  const steamCap = POPULAR_PRICES_ONLY ? 0 : STEAM_DETAILS_CAP
+  if (steamCap > 0) {
     const steamIds = steamIdsPrioritized(snapshot, ids)
-    console.log(`[refresh] Asama 3: Steam appdetails — ${steamIds.length} (cap ${STEAM_DETAILS_CAP})`)
+    console.log(`[refresh] Asama 3: Steam appdetails — ${steamIds.length} (cap ${steamCap})`)
     let sOk = 0
     for (const sid of steamIds) {
       try {
