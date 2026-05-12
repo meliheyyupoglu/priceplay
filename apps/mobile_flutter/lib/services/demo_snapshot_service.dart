@@ -231,6 +231,7 @@ class DemoSnapshotService {
     final epicUrl = "https://store.epicgames.com/en-US/browse?q=$q";
     final steam = g.steamAppId?.trim() ?? "";
     final steamUrl = steam.isNotEmpty ? "https://store.steampowered.com/app/${Uri.encodeComponent(steam)}/" : null;
+    final isTrash = g.gameId == "294416";
     return [
       PriceRow(
         storeId: "25",
@@ -245,9 +246,9 @@ class DemoSnapshotService {
         PriceRow(
           storeId: "1",
           storeName: "Steam",
-          salePrice: g.normalPrice ?? "19.99",
-          retailPrice: g.normalPrice ?? "19.99",
-          savings: "0",
+          salePrice: isTrash ? "12.94" : (g.normalPrice ?? "19.99"),
+          retailPrice: isTrash ? "18.88" : (g.normalPrice ?? "19.99"),
+          savings: isTrash ? "31.461864" : "0",
           dealId: "steam-list",
           purchaseUrl: steamUrl,
         ),

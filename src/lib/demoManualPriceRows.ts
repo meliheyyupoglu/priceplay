@@ -88,9 +88,9 @@ const TRASH_GOBLIN_ROWS: PriceRow[] = [
   {
     storeId: '1',
     storeName: 'Steam',
-    salePrice: '19.99',
-    retailPrice: '19.99',
-    savings: '0',
+    salePrice: '12.94',
+    retailPrice: '18.88',
+    savings: '31.461864',
     dealRating: '8',
     dealId: '',
     releaseDate: '',

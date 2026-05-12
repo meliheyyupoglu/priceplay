@@ -6,14 +6,14 @@ import {
   fetchAllKnownGames,
   fetchCuratedFreeToPlayByMetacritic,
   fetchDiscountedGames,
-  fetchHundredPercentFreeDeals,
   fetchNewReleaseDeals,
   fetchPopularGames,
 } from '../api/cheapshark'
 import type { Game } from '../types'
 import { GameCard } from '../components/GameCard'
 import { rotateByDailyOffset, sortGamesByMetacriticDesc, uniqueByGameKey } from '../lib/highlightUtils'
-import { filterExcludedGameDeals, mergeGameDealsCurated } from '../lib/gameDealsCurated'
+import { GAME_DEALS_CURATED } from '../lib/gameDealsCurated'
+import { enrichGamesByCheapSharkGameDetail } from '../lib/enrichGamesFromCheapShark'
 
 type Kind = 'popular' | 'discounted' | 'free-popular' | 'free-100' | 'new-releases' | 'discover-all'
 
@@ -70,17 +70,19 @@ export function BrowseListPage() {
         else if (k === 'free-popular') raw = await fetchCuratedFreeToPlayByMetacritic(80)
         else if (k === 'new-releases') raw = await fetchNewReleaseDeals(200, 18)
         else if (k === 'discover-all') raw = await fetchAllKnownGames(4000)
-        else raw = await fetchHundredPercentFreeDeals(400, 24).catch(() => fetchAllKnownGames(4000))
+        else if (k === 'free-100') {
+          const base = GAME_DEALS_CURATED.map((g) => ({ ...g }))
+          const { games } = await enrichGamesByCheapSharkGameDetail(base, ['289554', '294416'])
+          raw = games
+        } else raw = []
 
         const unique = uniqueByGameKey(raw)
         const list =
           k === 'popular'
             ? sortGamesByMetacriticDesc(unique)
-            : k === 'free-popular' || k === 'new-releases' || k === 'discover-all'
+            : k === 'free-popular' || k === 'new-releases' || k === 'discover-all' || k === 'free-100'
               ? unique
-              : k === 'free-100'
-                ? mergeGameDealsCurated(filterExcludedGameDeals(unique), 500)
-                : rotateByDailyOffset(unique)
+              : rotateByDailyOffset(unique)
         if (!cancelled) setGames(list)
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Yükleme hatası')

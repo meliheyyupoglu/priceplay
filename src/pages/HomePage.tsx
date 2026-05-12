@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   fetchAllKnownGames,
   fetchDiscountedGames,
-  fetchHundredPercentFreeDeals,
   fetchPopularGames,
   searchGames,
 } from '../api/cheapshark'
@@ -19,7 +18,8 @@ import { IconSearch } from '../components/NavIcons'
 import { HomePopularFreeGrid } from '../components/HomePopularFreeGrid'
 import { HomeGameDealsCarousel } from '../components/HomeGameDealsCarousel'
 import { HomeDiscoverGrid } from '../components/HomeDiscoverGrid'
-import { filterExcludedGameDeals, mergeGameDealsCurated } from '../lib/gameDealsCurated'
+import { GAME_DEALS_CURATED } from '../lib/gameDealsCurated'
+import { enrichGamesByCheapSharkGameDetail } from '../lib/enrichGamesFromCheapShark'
 
 const HOME_PREVIEW = 10
 const FETCH_PAGES = 4
@@ -103,22 +103,35 @@ export function HomePage() {
     ;(async () => {
       setLoading(true)
       setErr(null)
+      let rateLimited = false
       try {
         // F2P tohum + Metacritic enrich çok uzun sürer; ilk boyayı bloklamasın (Vercel/Render’da “takılı” hissi).
-        const [pRaw, dRaw, hoRaw, allRaw] = await Promise.all([
+        const [pRaw, dRaw, allRaw] = await Promise.all([
           fetchPopularGames(FETCH_PAGES),
           fetchDiscountedGames(FETCH_PAGES),
-          fetchHundredPercentFreeDeals(24, 12).catch(() => [] as Game[]),
           fetchAllKnownGames(2500).catch(() => [] as Game[]),
         ])
         if (cancelled) return
         const pUnique = uniqueByGameKey(pRaw)
-        const dUnique = uniqueByGameKey(dRaw)
-        const hoFiltered = filterExcludedGameDeals(uniqueByGameKey(hoRaw))
-        const hoUnique = hoFiltered.slice(0, HOME_100_CAROUSEL)
+        let dUnique = uniqueByGameKey(dRaw)
         const discoverPool = uniqueByGameKey(allRaw)
-        const hundredCarousel = mergeGameDealsCurated(pickRandomGames(hoUnique, HOME_100_CAROUSEL), HOME_100_CAROUSEL)
-        const hoKeys = new Set(hundredCarousel.map((g) => g.gameId || g.title))
+
+        const { games: dEnriched, hitRateLimit: rlD } = await enrichGamesByCheapSharkGameDetail(dUnique, [
+          '263462',
+          '317776',
+        ])
+        dUnique = dEnriched
+        if (rlD) rateLimited = true
+
+        let showcase = GAME_DEALS_CURATED.map((g) => ({ ...g }))
+        const { games: hoEnriched, hitRateLimit: rlH } = await enrichGamesByCheapSharkGameDetail(showcase, [
+          '289554',
+          '294416',
+        ])
+        showcase = hoEnriched
+        if (rlH) rateLimited = true
+
+        const hoKeys = new Set(showcase.map((g) => g.gameId || g.title))
         const dWithoutDeals = dUnique.filter((g) => !hoKeys.has(g.gameId || g.title))
         setThumbPool(discoverPool.length > 0 ? discoverPool : pUnique)
         const gtaForPopular =
@@ -136,16 +149,28 @@ export function HomePage() {
         } else {
           popularOut = popularPreviewByMetacritic(pUnique, HOME_PREVIEW)
         }
-        setPopular(popularOut)
+
+        const popIds = popularOut.map((g) => g.gameId).filter(Boolean).slice(0, 6)
+        const { games: popEnriched, hitRateLimit: rlP } = await enrichGamesByCheapSharkGameDetail(popularOut, popIds)
+        if (rlP) rateLimited = true
+
+        setPopular(popEnriched)
         setDiscounted(dWithoutDeals.slice(0, HOME_PREVIEW))
         setDiscoverGames(pickRandomGames(discoverPool, HOME_100_CAROUSEL))
-        setHundredOff(hundredCarousel)
+        setHundredOff(showcase)
         const freeFromPopular = pUnique.filter((g) => isNearFree(g) && !hoKeys.has(g.gameId || g.title))
         setFreePopular(freeFromPopular.slice(0, HOME_FREE_GRID))
         if (!cancelled) setLoading(false)
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Yükleme hatası')
       } finally {
+        if (!cancelled && rateLimited) {
+          setErr((prev) =>
+            prev
+              ? `${prev} CheapShark 429: bazı anlık fiyat güncellemeleri atlandı.`
+              : 'CheapShark 429: bazı anlık fiyat güncellemeleri atlandı; sayfa yine de yüklendi. Bir süre sonra yenileyebilirsin.',
+          )
+        }
         if (!cancelled) setLoading(false)
       }
     })()

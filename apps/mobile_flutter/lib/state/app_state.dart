@@ -212,16 +212,6 @@ class AppState extends ChangeNotifier {
     return p <= 0.01;
   }
 
-  bool _isHundredPercentDeal(Game g) {
-    final sale = double.tryParse((g.cheapest ?? "").replaceAll(",", ".")) ?? 999;
-    final retail = double.tryParse((g.normalPrice ?? "").replaceAll(",", ".")) ?? 0;
-    final sav = double.tryParse((g.savings ?? "").replaceAll(",", ".")) ?? 0;
-    if (sale > 0.05) return false;
-    if (retail < 0.5) return false;
-    if (sav < 99) return false;
-    return true;
-  }
-
   List<Game> freePopular() {
     final free100Keys = {
       for (final g in freeGames) (g.gameId.isNotEmpty ? g.gameId : g.title),
@@ -237,16 +227,7 @@ class AppState extends ChangeNotifier {
   }
 
   List<Game> hundredOffDeals() {
-    final merged = <String, Game>{};
-    for (final g in [..._withPrice(allKnown), ..._withPrice(freeGames)]) {
-      if (!_isHundredPercentDeal(g)) continue;
-      if (isExcludedFromGameDeals(g)) continue;
-      final key = g.gameId.isNotEmpty ? g.gameId : g.title;
-      if (!merged.containsKey(key)) merged[key] = g;
-    }
-    final pool = mergeGameDealsCurated(merged.values.toList(), max: 400);
-    pool.shuffle(Random(DateTime.now().day));
-    return pool;
+    return _withPrice([...kGameDealsCurated]);
   }
 
   List<Game> discoverShuffled() {
