@@ -8,30 +8,70 @@ import "package:url_launcher/url_launcher.dart";
 import "../i18n/app_strings.dart";
 import "../models/game.dart";
 import "../models/price_row.dart";
-import "../services/demo_snapshot_service.dart";
+import "../services/cheapshark_api_service.dart";
 import "../state/app_state.dart";
 import "../utils/store_purchase_url.dart";
 import "account_screen.dart";
 import "widgets.dart";
 
-class DetailScreen extends StatelessWidget {
+class DetailScreen extends StatefulWidget {
   const DetailScreen({super.key, required this.gameId, this.seedGame});
 
   final String gameId;
   final Game? seedGame;
 
   @override
+  State<DetailScreen> createState() => _DetailScreenState();
+}
+
+class _DetailScreenState extends State<DetailScreen> {
+  Future<GameDetailData>? _detailFuture;
+  String? _loadedForId;
+
+  void _ensureLoaded(AppState state) {
+    final key = "${widget.gameId}|${widget.seedGame?.gameId ?? ""}";
+    if (_detailFuture != null && _loadedForId == key) return;
+    _loadedForId = key;
+    _detailFuture = state.service.fetchGameDetail(widget.gameId, seedGame: widget.seedGame);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final lang = state.lang;
-    final detail = state.service.getGameDetail(gameId, seedGame: seedGame);
+    _ensureLoaded(state);
+    return FutureBuilder<GameDetailData>(
+      future: _detailFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return Scaffold(
+            appBar: AppBar(title: Text(trEn(lang, "Oyun", "Game"))),
+            body: const Center(child: CircularProgressIndicator()),
+          );
+        }
+        final detail = snapshot.data;
+        if (detail == null || detail.game.title == "Unknown Game") {
+          return Scaffold(
+            appBar: AppBar(title: Text(trEn(lang, "Oyun", "Game"))),
+            body: Center(child: Text(trEn(lang, "Oyun bulunamadi", "Game not found"))),
+          );
+        }
+        return _DetailBody(detail: detail, lang: lang);
+      },
+    );
+  }
+}
+
+class _DetailBody extends StatelessWidget {
+  const _DetailBody({required this.detail, required this.lang});
+
+  final GameDetailData detail;
+  final AppLang lang;
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
     final game = detail.game;
-    if (game.title == "Unknown Game") {
-      return Scaffold(
-        appBar: AppBar(title: Text(trEn(lang, "Oyun", "Game"))),
-        body: Center(child: Text(trEn(lang, "Oyun bulunamadi", "Game not found"))),
-      );
-    }
     final rows = detail.priceRows;
     return Scaffold(
       appBar: AppBar(

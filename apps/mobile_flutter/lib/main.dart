@@ -8,7 +8,7 @@ import "screens/favorites_screen.dart";
 import "screens/home_screen.dart";
 import "screens/search_screen.dart";
 import "services/auth_service.dart";
-import "services/demo_snapshot_service.dart";
+import "services/cheapshark_api_service.dart";
 import "state/app_state.dart";
 
 void main() {
@@ -21,7 +21,7 @@ class PricePlayMobileApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (_) => AppState(DemoSnapshotService(), AuthService())..init(),
+      create: (_) => AppState(CheapsharkApiService(), AuthService())..init(),
       child: MaterialApp(
         title: "PricePlay Mobile",
         debugShowCheckedModeBanner: false,

@@ -46,13 +46,13 @@ class _SearchScreenState extends State<SearchScreen> {
 
   void _runSearch(AppState state) {
     final q = _controller.text.trim();
-    setState(() {
-      results = q.length >= 3
-          ? state
-              .search(q)
-              .map((g) => state.service.getGameDetail(g.gameId.isNotEmpty ? g.gameId : g.title, seedGame: g).game)
-              .toList()
-          : [];
+    if (q.length < 3) {
+      setState(() => results = []);
+      return;
+    }
+    state.search(q).then((list) {
+      if (!mounted) return;
+      setState(() => results = list);
     });
   }
 

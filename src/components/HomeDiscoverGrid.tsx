@@ -20,7 +20,7 @@ export function HomeDiscoverGrid({ games }: Props) {
       <div className="home-deals-strip-top home-deals-strip-top--solo">
         <div>
           <h2 id="home-discover-title" className="home-deals-strip-title">
-            <Link to="/browse/discover-all" className="home-deals-strip-title-link">
+            <Link to="/browse/discover" className="home-deals-strip-title-link">
               Keşfet
             </Link>
             <span className="home-deals-strip-chev" aria-hidden>
@@ -31,7 +31,7 @@ export function HomeDiscoverGrid({ games }: Props) {
       </div>
 
       <div className="home-deals-strip-see">
-        <Link to="/browse/discover-all" className="section-see">
+        <Link to="/browse/discover" className="section-see">
           Tümünü gör →
         </Link>
       </div>

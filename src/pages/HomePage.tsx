@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
-  fetchAllKnownGames,
+  fetchDiscoverDeals,
   fetchDiscountedGames,
+  fetchHundredPercentFreeDeals,
   fetchPopularGames,
   searchGames,
 } from '../api/cheapshark'
@@ -18,13 +19,11 @@ import { IconSearch } from '../components/NavIcons'
 import { HomePopularFreeGrid } from '../components/HomePopularFreeGrid'
 import { HomeGameDealsCarousel } from '../components/HomeGameDealsCarousel'
 import { HomeDiscoverGrid } from '../components/HomeDiscoverGrid'
-import { GAME_DEALS_CURATED } from '../lib/gameDealsCurated'
-import { enrichGamesByCheapSharkGameDetail } from '../lib/enrichGamesFromCheapShark'
 
 const HOME_PREVIEW = 10
-const FETCH_PAGES = 4
 const HOME_FREE_GRID = 10
-const HOME_100_CAROUSEL = 25
+const HOME_DEALS = 25
+const HOME_DISCOVER = 25
 
 function pickRandomGames(games: Game[], count: number): Game[] {
   if (games.length <= count) return games
@@ -62,7 +61,7 @@ export function HomePage() {
   const [discounted, setDiscounted] = useState<Game[]>([])
   const [freePopular, setFreePopular] = useState<Game[]>([])
   const [discoverGames, setDiscoverGames] = useState<Game[]>([])
-  const [hundredOff, setHundredOff] = useState<Game[]>([])
+  const [dealGames, setDealGames] = useState<Game[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [suggest, setSuggest] = useState<Game[]>([])
@@ -103,74 +102,32 @@ export function HomePage() {
     ;(async () => {
       setLoading(true)
       setErr(null)
-      let rateLimited = false
       try {
-        // F2P tohum + Metacritic enrich çok uzun sürer; ilk boyayı bloklamasın (Vercel/Render’da “takılı” hissi).
-        const [pRaw, dRaw, allRaw] = await Promise.all([
-          fetchPopularGames(FETCH_PAGES),
-          fetchDiscountedGames(FETCH_PAGES),
-          fetchAllKnownGames(2500).catch(() => [] as Game[]),
+        const [pRaw, dRaw, discoverRaw, dealsRaw] = await Promise.all([
+          fetchPopularGames(1),
+          fetchDiscountedGames(1),
+          fetchDiscoverDeals(HOME_DISCOVER),
+          fetchHundredPercentFreeDeals(HOME_DEALS, 3),
         ])
         if (cancelled) return
+
         const pUnique = uniqueByGameKey(pRaw)
-        let dUnique = uniqueByGameKey(dRaw)
-        const discoverPool = uniqueByGameKey(allRaw)
+        const dUnique = uniqueByGameKey(dRaw)
+        const dealKeys = new Set(dealsRaw.map((g) => g.gameId || g.title))
 
-        const { games: dEnriched, hitRateLimit: rlD } = await enrichGamesByCheapSharkGameDetail(dUnique, [
-          '263462',
-          '317776',
-        ])
-        dUnique = dEnriched
-        if (rlD) rateLimited = true
-
-        let showcase = GAME_DEALS_CURATED.map((g) => ({ ...g }))
-        const { games: hoEnriched, hitRateLimit: rlH } = await enrichGamesByCheapSharkGameDetail(showcase, [
-          '289554',
-          '294416',
-        ])
-        showcase = hoEnriched
-        if (rlH) rateLimited = true
-
-        const hoKeys = new Set(showcase.map((g) => g.gameId || g.title))
-        const dWithoutDeals = dUnique.filter((g) => !hoKeys.has(g.gameId || g.title))
-        setThumbPool(discoverPool.length > 0 ? discoverPool : pUnique)
-        const gtaForPopular =
-          discoverPool.find((g) => g.gameId === '298615') ||
-          dUnique.find((g) => g.gameId === '298615') ||
-          pUnique.find((g) => g.gameId === '298615') ||
-          null
-        let popularOut: Game[]
-        if (gtaForPopular) {
-          const withoutGta = pUnique.filter((g) => g.gameId !== '298615')
-          popularOut = [
-            gtaForPopular,
-            ...popularPreviewByMetacritic(withoutGta, HOME_PREVIEW - 1),
-          ].slice(0, HOME_PREVIEW)
-        } else {
-          popularOut = popularPreviewByMetacritic(pUnique, HOME_PREVIEW)
-        }
-
-        const popIds = popularOut.map((g) => g.gameId).filter(Boolean).slice(0, 6)
-        const { games: popEnriched, hitRateLimit: rlP } = await enrichGamesByCheapSharkGameDetail(popularOut, popIds)
-        if (rlP) rateLimited = true
-
-        setPopular(popEnriched)
-        setDiscounted(dWithoutDeals.slice(0, HOME_PREVIEW))
-        setDiscoverGames(pickRandomGames(discoverPool, HOME_100_CAROUSEL))
-        setHundredOff(showcase)
-        const freeFromPopular = pUnique.filter((g) => isNearFree(g) && !hoKeys.has(g.gameId || g.title))
-        setFreePopular(freeFromPopular.slice(0, HOME_FREE_GRID))
-        if (!cancelled) setLoading(false)
+        setThumbPool(uniqueByGameKey([...pUnique, ...dUnique]))
+        setPopular(popularPreviewByMetacritic(pUnique, HOME_PREVIEW))
+        setDiscounted(
+          dUnique.filter((g) => !dealKeys.has(g.gameId || g.title)).slice(0, HOME_PREVIEW),
+        )
+        setDiscoverGames(pickRandomGames(discoverRaw, HOME_DISCOVER))
+        setDealGames(dealsRaw)
+        setFreePopular(
+          pUnique.filter((g) => isNearFree(g) && !dealKeys.has(g.gameId || g.title)).slice(0, HOME_FREE_GRID),
+        )
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Yükleme hatası')
       } finally {
-        if (!cancelled && rateLimited) {
-          setErr((prev) =>
-            prev
-              ? `${prev} CheapShark 429: bazı anlık fiyat güncellemeleri atlandı.`
-              : 'CheapShark 429: bazı anlık fiyat güncellemeleri atlandı; sayfa yine de yüklendi. Bir süre sonra yenileyebilirsin.',
-          )
-        }
         if (!cancelled) setLoading(false)
       }
     })()
@@ -283,7 +240,7 @@ export function HomePage() {
 
           <HomeDiscoverGrid games={discoverGames} />
 
-          <HomeGameDealsCarousel games={hundredOff} />
+          <HomeGameDealsCarousel games={dealGames} />
         </>
       )}
     </>

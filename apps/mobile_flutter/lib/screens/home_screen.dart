@@ -111,15 +111,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final discoverPool = state.discoverShuffled();
     final discoverCarousel = discoverPool.take(25).toList();
     final discoverRandomList = discoverPool.skip(25).take(10).toList();
-    final popularTop10 = popular
-        .take(10)
-        .map((g) => state.service.getGameDetail(g.gameId.isNotEmpty ? g.gameId : g.title, seedGame: g).game)
-        .toList();
-    final dealTop = state
-        .hundredOffDeals()
-        .take(25)
-        .map((g) => state.service.getGameDetail(g.gameId.isNotEmpty ? g.gameId : g.title, seedGame: g).game)
-        .toList();
+    final popularTop10 = popular.take(10).toList();
+    final dealTop = state.hundredOffDeals().take(25).toList();
     _bindPopularAutoScroll(popularTop10.length);
 
     return ListView(
@@ -202,7 +195,7 @@ class _HomeScreenState extends State<HomeScreen> {
         SectionHeader(
           title: trEn(lang, "Kesfet", "Discover"),
           trailing: TextButton(
-            onPressed: () => _openBrowseKind(context, "discover-all", "Kesfet - Tum Oyunlar", "Discover - All Games"),
+            onPressed: () => _openBrowseKind(context, "discover", "Kesfet", "Discover"),
             child: Text(trEn(lang, "Tumunu gor", "See all")),
           ),
         ),

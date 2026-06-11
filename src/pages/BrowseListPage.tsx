@@ -3,26 +3,25 @@ import { Link, useParams } from 'react-router-dom'
 import { PageBack } from '../components/PageBack'
 import { FavoritesLoginHint } from '../components/FavoritesLoginHint'
 import {
-  fetchAllKnownGames,
-  fetchCuratedFreeToPlayByMetacritic,
+  fetchDiscoverDeals,
   fetchDiscountedGames,
+  fetchFreePopularGames,
+  fetchHundredPercentFreeDeals,
   fetchNewReleaseDeals,
   fetchPopularGames,
 } from '../api/cheapshark'
 import type { Game } from '../types'
 import { GameCard } from '../components/GameCard'
 import { rotateByDailyOffset, sortGamesByMetacriticDesc, uniqueByGameKey } from '../lib/highlightUtils'
-import { GAME_DEALS_CURATED } from '../lib/gameDealsCurated'
-import { enrichGamesByCheapSharkGameDetail } from '../lib/enrichGamesFromCheapShark'
 
-type Kind = 'popular' | 'discounted' | 'free-popular' | 'free-100' | 'new-releases' | 'discover-all'
+type Kind = 'popular' | 'discounted' | 'free-popular' | 'free-100' | 'new-releases' | 'discover'
 
 function normalizeKind(raw: string | undefined): Kind {
   if (raw === 'discounted') return 'discounted'
   if (raw === 'free-popular') return 'free-popular'
   if (raw === 'free-100') return 'free-100'
   if (raw === 'new-releases') return 'new-releases'
-  if (raw === 'discover-all') return 'discover-all'
+  if (raw === 'discover' || raw === 'discover-all') return 'discover'
   return 'popular'
 }
 
@@ -43,20 +42,20 @@ export function BrowseListPage() {
           ? 'Popüler ücretsiz oyunlar'
           : k === 'new-releases'
             ? 'Yeni çıkan oyunlar'
-            : k === 'discover-all'
-              ? 'Keşfet - Tüm Oyunlar'
-              : 'Keşfet'
+            : k === 'discover'
+              ? 'Keşfet'
+              : 'Oyun fırsatları'
 
   const subtitle =
     k === 'free-popular'
-      ? 'Sürekli ücretsiz (F2P) bilinen başlıklar; Metacritic’e göre yüksekten düşüğe. Geçici %100 indirimli ücretsiz teklifler bu listede yok.'
+      ? 'CheapShark popüler ve indirimli listelerinden sürekli ücretsiz (F2P) oyunlar.'
       : k === 'free-100'
         ? 'Şu an ücretsiz veya çok düşük fiyatlı kampanya teklifleri (Epic Games Store, Steam ve diğer mağazalar).'
         : k === 'new-releases'
           ? 'Çıkış tarihi bilinen oyunlar arasından en yeni tarihe göre sıralanır.'
-          : k === 'discover-all'
-            ? null
-          : null
+          : k === 'discover'
+            ? 'Popüler ve indirimli fırsatlardan derlenen güncel keşif listesi.'
+            : null
 
   useEffect(() => {
     let cancelled = false
@@ -65,22 +64,19 @@ export function BrowseListPage() {
       setErr(null)
       try {
         let raw: Game[] = []
-        if (k === 'popular') raw = await fetchPopularGames(20)
-        else if (k === 'discounted') raw = await fetchDiscountedGames(20)
-        else if (k === 'free-popular') raw = await fetchCuratedFreeToPlayByMetacritic(80)
-        else if (k === 'new-releases') raw = await fetchNewReleaseDeals(200, 18)
-        else if (k === 'discover-all') raw = await fetchAllKnownGames(4000)
-        else if (k === 'free-100') {
-          const base = GAME_DEALS_CURATED.map((g) => ({ ...g }))
-          const { games } = await enrichGamesByCheapSharkGameDetail(base, ['289554', '294416'])
-          raw = games
-        } else raw = []
+        if (k === 'popular') raw = await fetchPopularGames(5)
+        else if (k === 'discounted') raw = await fetchDiscountedGames(5)
+        else if (k === 'free-popular') raw = await fetchFreePopularGames(60)
+        else if (k === 'new-releases') raw = await fetchNewReleaseDeals(80, 6)
+        else if (k === 'discover') raw = await fetchDiscoverDeals(120)
+        else if (k === 'free-100') raw = await fetchHundredPercentFreeDeals(80, 6)
+        else raw = []
 
         const unique = uniqueByGameKey(raw)
         const list =
           k === 'popular'
             ? sortGamesByMetacriticDesc(unique)
-            : k === 'free-popular' || k === 'new-releases' || k === 'discover-all' || k === 'free-100'
+            : k === 'free-popular' || k === 'new-releases' || k === 'discover' || k === 'free-100'
               ? unique
               : rotateByDailyOffset(unique)
         if (!cancelled) setGames(list)
@@ -105,7 +101,7 @@ export function BrowseListPage() {
           {subtitle}
         </p>
       )}
-      {!loading && !err && k !== 'discover-all' && (
+      {!loading && !err && (
         <p className="muted" style={{ marginTop: 8 }}>
           {games.length} oyun listeleniyor.
         </p>

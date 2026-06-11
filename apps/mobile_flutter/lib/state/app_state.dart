@@ -5,24 +5,24 @@ import "../i18n/app_strings.dart";
 import "../models/game.dart";
 import "../models/user.dart";
 import "../services/auth_service.dart";
-import "../services/demo_snapshot_service.dart";
-import "../config/game_deals_curated.dart";
+import "../services/cheapshark_api_service.dart";
 import "../utils/genre_label.dart";
 
 class AppState extends ChangeNotifier {
   AppState(this._service, this._authService);
 
-  final DemoSnapshotService _service;
+  final CheapsharkApiService _service;
   final AuthService _authService;
   bool isReady = false;
   bool isAuthenticated = false;
   User? authUser;
   String? _authToken;
-  final Set<String> favoriteIds = <String>{};
+  final Map<String, Game> _favoriteGames = <String, Game>{};
   final Map<String, double> _alertTargetByGame = <String, double>{};
   final Map<String, bool> _alertEnabledByGame = <String, bool>{};
   AppLang lang = AppLang.tr;
-  final Map<String, bool> _pricePresenceCache = <String, bool>{};
+
+  CheapsharkApiService get service => _service;
 
   Future<void> init() async {
     await _service.load();
@@ -42,60 +42,26 @@ class AppState extends ChangeNotifier {
   }
 
   List<Game> get popular => _withPrice(_service.fetchPopularGames());
-
-  /// Popüler vitrinde Grand Theft Auto V (CheapShark `298615`) öne alınır.
-  List<Game> popularForHome() {
-    final base = _withPrice(popular);
-    if (base.any((g) => g.gameId == "298615")) return base;
-    final gta = _service
-        .getGameDetail("298615", seedGame: const Game(gameId: "298615", title: "Grand Theft Auto V"))
-        .game;
-    if (!_hasPrice(gta)) return base;
-    return _withPrice([gta, ...base]);
-  }
   List<Game> get discounted => _withPrice(_service.fetchDiscountedGames());
-  List<Game> get freeGames => _withPrice(_service.fetchFreeGames());
   List<Game> get newReleases => _withPrice(_service.fetchNewReleases());
-  List<Game> get allKnown => _withPrice(_service.fetchAllKnownGames());
 
-  bool _matchesGtaSearchQuery(String query) {
-    final q = query.trim().toLowerCase();
-    if (q.length < 3) return false;
-    return q.contains("gta") || q.contains("grand theft");
+  List<Game> popularForHome() => _withPrice(popular);
+
+  Future<List<Game>> search(String query) async {
+    final list = await _service.searchGames(query);
+    return _withPrice(list);
   }
 
-  List<Game> search(String query) {
-    final base = _withPrice(_service.searchGames(query));
-    if (!_matchesGtaSearchQuery(query)) return base;
-    if (base.any((g) => g.gameId == "298615")) return base;
-    final gta = _service
-        .getGameDetail("298615", seedGame: const Game(gameId: "298615", title: "Grand Theft Auto V"))
-        .game;
-    if (!_hasPrice(gta)) return base;
-    return _withPrice([gta, ...base]);
-  }
   Game? findById(String id) => _service.findGameById(id);
-  DemoSnapshotService get service => _service;
-
-  bool _hasPrice(Game g) {
-    final p = double.tryParse((g.cheapest ?? "").replaceAll(",", "."));
-    if (p != null && p >= 0) return true;
-
-    final key = g.gameId.isNotEmpty ? g.gameId : g.title;
-    final cached = _pricePresenceCache[key];
-    if (cached != null) return cached;
-
-    final detail = _service.getGameDetail(key, seedGame: g);
-    final fromRows = detail.priceRows.isNotEmpty;
-    final fromDetailCheapest = (double.tryParse((detail.game.cheapest ?? "").replaceAll(",", ".")) ?? -1) >= 0;
-    final ok = fromRows || fromDetailCheapest;
-    _pricePresenceCache[key] = ok;
-    return ok;
-  }
 
   bool _isBlockedTitle(Game g) {
     final t = g.title.trim().toLowerCase();
     return t == "the ball" || t == "counter-strike 2" || t == "counter strike 2" || t == "cs2" || t == "cs 2";
+  }
+
+  bool _hasPrice(Game g) {
+    final p = double.tryParse((g.cheapest ?? "").replaceAll(",", "."));
+    return p != null && p >= 0;
   }
 
   List<Game> _withPrice(List<Game> list) {
@@ -104,12 +70,12 @@ class AppState extends ChangeNotifier {
 
   void toggleFavorite(Game game) {
     final key = game.gameId.isNotEmpty ? game.gameId : game.title;
-    if (favoriteIds.contains(key)) {
-      favoriteIds.remove(key);
+    if (_favoriteGames.containsKey(key)) {
+      _favoriteGames.remove(key);
       _alertTargetByGame.remove(key);
       _alertEnabledByGame.remove(key);
     } else {
-      favoriteIds.add(key);
+      _favoriteGames[key] = game;
       final current = double.tryParse((game.cheapest ?? "").replaceAll(",", ".")) ?? 10.0;
       _alertTargetByGame[key] = current;
       _alertEnabledByGame[key] = false;
@@ -183,7 +149,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool isFavorite(String gameId) => favoriteIds.contains(gameId);
+  bool isFavorite(String gameId) => _favoriteGames.containsKey(gameId);
 
   void setLang(AppLang value) {
     if (lang == value) return;
@@ -191,15 +157,10 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<Game> get favorites {
-    final map = {
-      for (final g in _withPrice(_service.fetchAllKnownGames())) (g.gameId.isNotEmpty ? g.gameId : g.title): g,
-    };
-    return favoriteIds.map((id) => map[id]).whereType<Game>().toList();
-  }
+  List<Game> get favorites => _favoriteGames.values.toList();
 
   List<Game> byCategory(String category) {
-    return _withPrice(allKnown).where((g) => genreLabelFor(g.title) == category).toList();
+    return _withPrice(_service.fetchDiscoverDeals()).where((g) => genreLabelFor(g.title) == category).toList();
   }
 
   bool _isNearFree(Game g) {
@@ -213,12 +174,10 @@ class AppState extends ChangeNotifier {
   }
 
   List<Game> freePopular() {
-    final free100Keys = {
-      for (final g in freeGames) (g.gameId.isNotEmpty ? g.gameId : g.title),
-    };
+    final dealKeys = {for (final g in _service.fetchFreeDeals()) (g.gameId.isNotEmpty ? g.gameId : g.title)};
     return popular.where((g) {
       final key = g.gameId.isNotEmpty ? g.gameId : g.title;
-      return _isNearFree(g) && !free100Keys.contains(key);
+      return _isNearFree(g) && !dealKeys.contains(key);
     }).toList();
   }
 
@@ -226,12 +185,10 @@ class AppState extends ChangeNotifier {
     return _withPrice(discounted).where((g) => !_isZeroDollar(g)).toList();
   }
 
-  List<Game> hundredOffDeals() {
-    return _withPrice([...kGameDealsCurated]);
-  }
+  List<Game> hundredOffDeals() => _withPrice(_service.fetchFreeDeals());
 
   List<Game> discoverShuffled() {
-    final pool = [..._withPrice(allKnown)];
+    final pool = [..._withPrice(_service.fetchDiscoverDeals())];
     pool.shuffle(Random(DateTime.now().day + DateTime.now().month));
     return pool;
   }
@@ -242,7 +199,7 @@ class AppState extends ChangeNotifier {
     if (k == "free-popular") return _withPrice(freePopular());
     if (k == "free-100") return _withPrice(hundredOffDeals());
     if (k == "new-releases") return _withPrice(newReleases);
-    if (k == "discover-all") return _withPrice(discoverShuffled());
+    if (k == "discover" || k == "discover-all") return _withPrice(discoverShuffled());
     return _withPrice(popular);
   }
 

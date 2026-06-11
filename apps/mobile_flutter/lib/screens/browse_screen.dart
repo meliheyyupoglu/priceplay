@@ -17,7 +17,7 @@ class BrowseScreen extends StatefulWidget {
 }
 
 class _BrowseScreenState extends State<BrowseScreen> {
-  String selected = "discover-all";
+  String selected = "discover";
   String selectedCategory = "all";
 
   Future<void> _onFavoriteTap(BuildContext context, AppState state, Game game) async {
@@ -56,7 +56,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
       children: [
         PageHero(
           title: trEn(lang, "Kategoriler", "Browse"),
-          subtitle: trEn(lang, "Tum oyunlari gez veya filtreleyerek daralt", "Browse all games or narrow down with filters"),
+          subtitle: trEn(lang, "Canli firsat listelerini gez veya filtreleyerek daralt", "Browse live deal lists or narrow down with filters"),
         ),
         const SizedBox(height: 12),
         Row(
@@ -74,7 +74,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
                   DropdownMenuItem(value: "discounted", child: Text(trEn(lang, "Indirimdekiler", "Discounted"))),
                   DropdownMenuItem(value: "free-100", child: Text(trEn(lang, "0 dolar oyunlar", "0-dollar games"))),
                   DropdownMenuItem(value: "new-releases", child: Text(trEn(lang, "Yeni Cikanlar", "New Releases"))),
-                  DropdownMenuItem(value: "discover-all", child: Text(trEn(lang, "Tum Oyunlar", "All Games"))),
+                  DropdownMenuItem(value: "discover", child: Text(trEn(lang, "Kesfet", "Discover"))),
                 ],
                 onChanged: (value) => setState(() => selected = value ?? "popular"),
               ),

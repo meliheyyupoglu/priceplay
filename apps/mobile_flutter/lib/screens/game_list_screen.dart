@@ -28,9 +28,7 @@ class GameListScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final lang = state.lang;
-    final enrichedItems = items
-        .map((g) => state.service.getGameDetail(g.gameId.isNotEmpty ? g.gameId : g.title, seedGame: g).game)
-        .toList();
+    final enrichedItems = items;
     return Scaffold(
       appBar: AppBar(title: Text(trEn(lang, titleTr, titleEn))),
       body: ListView(

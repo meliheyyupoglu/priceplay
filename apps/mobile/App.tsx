@@ -1,13 +1,10 @@
 import { StatusBar } from 'expo-status-bar'
 import { useEffect, useMemo, useState } from 'react'
 import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native'
-import demoSnapshot from '../../public/demo-snapshot.json'
-import { createLocalCheapsharkApi, type DemoSnapshot, type Game } from '../../packages/shared/src'
-
-const snapshot = demoSnapshot as DemoSnapshot
+import { createLiveCheapsharkApi, type Game } from '../../packages/shared/src'
 
 export default function App() {
-  const api = useMemo(() => createLocalCheapsharkApi(snapshot), [])
+  const api = useMemo(() => createLiveCheapsharkApi(), [])
   const [popular, setPopular] = useState<Game[]>([])
   const [discounted, setDiscounted] = useState<Game[]>([])
   const [free100, setFree100] = useState<Game[]>([])
@@ -19,9 +16,9 @@ export default function App() {
     ;(async () => {
       try {
         const [p, d, f] = await Promise.all([
-          api.fetchPopularGames(4),
-          api.fetchDiscountedGames(4),
-          api.fetchHundredPercentFreeDeals(24, 12),
+          api.fetchPopularGames(1),
+          api.fetchDiscountedGames(1),
+          api.fetchHundredPercentFreeDeals(24, 3),
         ])
         if (cancelled) return
         setPopular(p.slice(0, 10))
@@ -43,14 +40,14 @@ export default function App() {
       <StatusBar style="light" />
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>PricePlay Mobile</Text>
-        <Text style={styles.subtitle}>Local snapshot mode active</Text>
+        <Text style={styles.subtitle}>Canli CheapShark API</Text>
         {loading && <Text style={styles.muted}>Loading...</Text>}
         {error && <Text style={styles.error}>{error}</Text>}
         {!loading && !error && (
           <>
             <Section title="Popular (top 10)" games={popular} />
             <Section title="Discounted (top 10)" games={discounted} />
-            <Section title="Free 100 (top 10)" games={free100} />
+            <Section title="Free deals (top 10)" games={free100} />
           </>
         )}
       </ScrollView>
